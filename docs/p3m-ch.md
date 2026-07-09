@@ -37,8 +37,7 @@ their contents (matching `chmod -R` semantics). At least one of
 
 | Option | Description |
 |--------|-------------|
-| `--apply` | Actually make the changes. Without it the run is a dry run. |
-| `-n, --dry-run` | Explicitly request a dry run (the default). |
+| `--apply` | Actually make the changes. Without it the run is a dry run — there is deliberately no `--dry-run` flag, since that is the default state. |
 | `-j, --threads N` | Worker threads, 1–512. Default: number of online CPUs. |
 | `-o, --output FILE` | Write the CSV change list to `FILE` and show a live progress display. |
 | `-h, --help`, `-V, --version` | Usage / version. |

@@ -25,7 +25,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_CH_VERSION "1.0.0"
+#define P3M_CH_VERSION "1.1.0"
 
 /* ------------------------------------------------------------------ */
 /* mode specifications: octal or symbolic clause list                   */
@@ -280,17 +280,19 @@ static void do_change(int dfd, const char *name, const char *path,
     if (c->own || c->grp) {
         if (fchownat(dfd, name, c->own ? g.uid : (uid_t)-1,
                      c->grp ? g.gid : (gid_t)-1, AT_SYMLINK_NOFOLLOW) != 0) {
+            int e = errno;
             snprintf(result, sizeof result, "failed: chown: %s",
-                     strerror(errno));
-            p3m_note_error(path, "chown", errno);
+                     strerror(e));
+            p3m_note_error(path, "chown", e);
             ok = false;
         }
     }
     if (ok && c->mode) {
         if (fchmodat(dfd, name, c->newm, 0) != 0) {
+            int e = errno;
             snprintf(result, sizeof result, "failed: chmod: %s",
-                     strerror(errno));
-            p3m_note_error(path, "chmod", errno);
+                     strerror(e));
+            p3m_note_error(path, "chmod", e);
             ok = false;
         }
     }
@@ -544,7 +546,6 @@ static void usage(FILE *to)
 "\n"
 "Execution:\n"
 "      --apply           make the changes (default is a dry run)\n"
-"  -n, --dry-run         list changes without applying them (default)\n"
 "  -j, --threads N       worker threads (default: number of online CPUs)\n"
 "  -o, --output FILE     write CSV to FILE; a live progress display is shown\n"
 "  -h, --help            show this help and exit\n"
@@ -565,7 +566,6 @@ int main(int argc, char **argv)
         { "owner",     required_argument, NULL, 'u' },
         { "group",     required_argument, NULL, 'g' },
         { "apply",     no_argument,       NULL, 1000 },
-        { "dry-run",   no_argument,       NULL, 'n' },
         { "threads",   required_argument, NULL, 'j' },
         { "output",    required_argument, NULL, 'o' },
         { "help",      no_argument,       NULL, 'h' },
@@ -577,7 +577,7 @@ int main(int argc, char **argv)
     const char *ownarg = NULL, *grparg = NULL;
 
     int c;
-    while ((c = getopt_long(argc, argv, "m:f:d:u:g:nj:o:hV", lopts, NULL))
+    while ((c = getopt_long(argc, argv, "m:f:d:u:g:j:o:hV", lopts, NULL))
            != -1) {
         switch (c) {
         case 'm':
@@ -606,9 +606,6 @@ int main(int argc, char **argv)
             break;
         case 1000:
             g.apply = true;
-            break;
-        case 'n':
-            g.apply = false;
             break;
         case 'j': {
             char *end;
