@@ -25,7 +25,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_CH_VERSION "1.1.0"
+#define P3M_CH_VERSION "1.2.0"
 
 /* ------------------------------------------------------------------ */
 /* mode specifications: octal or symbolic clause list                   */
@@ -188,6 +188,8 @@ static struct {
     bool            apply;
     int             nthreads;
     const char     *outpath;    /* NULL => stdout */
+    bool            quiet;
+    bool            suppress;   /* quiet without -o: emit nothing at all */
     bool            progress;
     mode_t          umask_val;
 } g;
@@ -232,6 +234,8 @@ static struct chg calc_changes(const struct stat *st)
 static void emit_row(p3m_outbuf *ob, const char *path, const struct stat *st,
                      const struct chg *c, const char *result)
 {
+    if (g.suppress)
+        return;
     if (!p3m_ob_room(ob, 2 * strlen(path) + 512)) {
         p3m_note_error(path, "emit", ENAMETOOLONG);
         return;
@@ -463,7 +467,7 @@ static void prog_draw(double rate, int frame)
         C_DIM, g.apply ? "apply" : "dry-run", C_RESET);
     ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "path", C_RESET, ptr);
     ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "output", C_RESET,
-        g.outpath ? g.outpath : "stdout");
+        g.outpath ? g.outpath : (g.quiet ? "none (-q)" : "stdout"));
     ADD("\x1b[K  %s%-9s%s %-14d %s%-10s%s %s\n",
         C_DIM, "threads", C_RESET, g.nthreads,
         C_DIM, "action", C_RESET, g.apply ? "apply" : "dry-run");
@@ -548,6 +552,8 @@ static void usage(FILE *to)
 "      --apply           make the changes (default is a dry run)\n"
 "  -j, --threads N       worker threads (default: number of online CPUs)\n"
 "  -o, --output FILE     write CSV to FILE; a live progress display is shown\n"
+"  -q, --quiet           suppress the console listing (progress and the\n"
+"                        summary are still shown; a -o file is still written)\n"
 "  -h, --help            show this help and exit\n"
 "  -V, --version         show version and exit\n"
 "\n"
@@ -568,6 +574,7 @@ int main(int argc, char **argv)
         { "apply",     no_argument,       NULL, 1000 },
         { "threads",   required_argument, NULL, 'j' },
         { "output",    required_argument, NULL, 'o' },
+        { "quiet",     no_argument,       NULL, 'q' },
         { "help",      no_argument,       NULL, 'h' },
         { "version",   no_argument,       NULL, 'V' },
         { 0, 0, 0, 0 }
@@ -577,7 +584,7 @@ int main(int argc, char **argv)
     const char *ownarg = NULL, *grparg = NULL;
 
     int c;
-    while ((c = getopt_long(argc, argv, "m:f:d:u:g:j:o:hV", lopts, NULL))
+    while ((c = getopt_long(argc, argv, "m:f:d:u:g:j:o:qhV", lopts, NULL))
            != -1) {
         switch (c) {
         case 'm':
@@ -620,6 +627,9 @@ int main(int argc, char **argv)
         }
         case 'o':
             g.outpath = optarg;
+            break;
+        case 'q':
+            g.quiet = true;
             break;
         case 'h':
             usage(stdout);
@@ -693,7 +703,8 @@ int main(int argc, char **argv)
     g.umask_val = umask(0);
     umask(g.umask_val);
     p3m_color = isatty(STDERR_FILENO);
-    g.progress = g.outpath && isatty(STDERR_FILENO);
+    g.suppress = g.quiet && !g.outpath;
+    g.progress = (g.outpath || g.quiet) && isatty(STDERR_FILENO);
 
     FILE *out;
     if (g.outpath) {
@@ -714,7 +725,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "%sp3m-ch: dry run — no changes will be made "
                 "(use --apply)%s\n", C_DIM, C_RESET);
 
-    fputs(CSV_HEADER, out);
+    if (!g.suppress)
+        fputs(CSV_HEADER, out);
 
     /* seed the queue; the named paths themselves are processed too */
     p3m_stack_init(&stk, g.nthreads);

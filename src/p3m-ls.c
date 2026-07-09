@@ -23,7 +23,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_LS_VERSION "1.1.0"
+#define P3M_LS_VERSION "1.2.0"
 
 enum detail_mode { MODE_BASIC, MODE_STANDARD, MODE_FULL };
 
@@ -35,6 +35,8 @@ static struct {
     bool             no_dirs;
     unsigned         typemask;   /* output filter, one bit per DT_* value */
     const char      *outpath;    /* NULL => stdout */
+    bool             quiet;
+    bool             suppress;   /* quiet without -o: emit nothing at all */
     bool             progress;
 } g = { .mode = MODE_BASIC, .typemask = ~0u };
 
@@ -167,7 +169,7 @@ static void scan_dir(const char *dirpath, p3m_outbuf *ob)
             atomic_fetch_add_explicit(&n_bytes, (uint64_t)st.st_size,
                                       memory_order_relaxed);
 
-        bool emit = !(isdir && g.no_dirs) &&
+        bool emit = !g.suppress && !(isdir && g.no_dirs) &&
                     (dt < 32 && (g.typemask & (1u << dt)));
 
         if (emit || isdir) {
@@ -274,7 +276,8 @@ static void prog_draw(double rate, int frame)
         C_CYAN, p3m_spinner[frame % 10], C_RESET, C_BOLD, C_RESET,
         C_DIM, C_RESET);
     ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "path", C_RESET, ptr);
-    ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "output", C_RESET, g.outpath);
+    ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "output", C_RESET,
+        g.outpath ? g.outpath : "none (-q)");
     ADD("\x1b[K  %s%-9s%s %-14d %s%-8s%s %s\n",
         C_DIM, "threads", C_RESET, g.nthreads,
         C_DIM, "mode", C_RESET, mode_names[g.mode]);
@@ -370,6 +373,8 @@ static void usage(FILE *to)
 "                        p fifo  s socket\n"
 "      --no-dirs       omit directories from the output\n"
 "  -o, --output FILE   write CSV to FILE; a live progress display is shown\n"
+"  -q, --quiet         suppress the console listing (progress and the\n"
+"                      summary are still shown; a -o file is still written)\n"
 "  -h, --help          show this help and exit\n"
 "  -V, --version       show version and exit\n"
 "\n"
@@ -386,13 +391,14 @@ int main(int argc, char **argv)
         { "type",    required_argument, NULL, 't' },
         { "no-dirs", no_argument,       NULL, 1000 },
         { "output",  required_argument, NULL, 'o' },
+        { "quiet",   no_argument,       NULL, 'q' },
         { "help",    no_argument,       NULL, 'h' },
         { "version", no_argument,       NULL, 'V' },
         { 0, 0, 0, 0 }
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "m:j:t:o:hV", lopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "m:j:t:o:qhV", lopts, NULL)) != -1) {
         switch (c) {
         case 'm':
             if      (!strcmp(optarg, "basic")    || !strcmp(optarg, "b"))
@@ -431,6 +437,9 @@ int main(int argc, char **argv)
         case 'o':
             g.outpath = optarg;
             break;
+        case 'q':
+            g.quiet = true;
+            break;
         case 'h':
             usage(stdout);
             return 0;
@@ -449,7 +458,8 @@ int main(int argc, char **argv)
         g.nthreads = (n > 0) ? (int)n : 4;
     }
     p3m_color = isatty(STDERR_FILENO);
-    g.progress = g.outpath && isatty(STDERR_FILENO);
+    g.suppress = g.quiet && !g.outpath;
+    g.progress = (g.outpath || g.quiet) && isatty(STDERR_FILENO);
 
     FILE *out;
     if (g.outpath) {
@@ -466,7 +476,8 @@ int main(int argc, char **argv)
     setvbuf(out, outvbuf, _IOFBF, sizeof outvbuf);
     p3m_sink_init(&sink, out);
 
-    fputs(csv_header(), out);
+    if (!g.suppress)
+        fputs(csv_header(), out);
 
     /* seed the work queue with the root paths */
     p3m_stack_init(&stk, g.nthreads);
@@ -498,7 +509,7 @@ int main(int argc, char **argv)
             atomic_fetch_add(&n_files, 1);
             if (S_ISREG(st.st_mode))
                 atomic_fetch_add(&n_bytes, (uint64_t)st.st_size);
-            if (dt < 32 && (g.typemask & (1u << dt)))
+            if (!g.suppress && dt < 32 && (g.typemask & (1u << dt)))
                 emit_entry(&rootob, root, dt, &st);
             free(root);
         }
@@ -559,7 +570,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (g.outpath)
+    if (g.outpath || g.quiet)
         print_summary(elapsed);
     p3m_print_errors();
     p3m_stack_destroy(&stk);

@@ -25,6 +25,7 @@ given; they are scanned concurrently as part of the same run.
 | `-t, --type TYPES` | Only output entries of the given types. Types combine freely, e.g. `-t fl` for files and symlinks. See [Type characters](#type-characters). |
 | `--no-dirs` | Omit directories from the output. The walk still descends into them. |
 | `-o, --output FILE` | Write the CSV to `FILE` instead of stdout, and show a live progress display on the terminal. |
+| `-q, --quiet` | Suppress the console listing. Progress (on a terminal) and the end-of-run summary are still shown, and a `-o` file is still written in full — `-q` only silences stdout. |
 | `-h, --help` | Show usage and exit. |
 | `-V, --version` | Show version and exit. |
 
@@ -91,7 +92,7 @@ into every directory.
 
 ## Progress display
 
-When `-o` is used and stderr is a terminal, a live status block is shown
+When `-o` or `-q` is used and stderr is a terminal, a live status block is shown
 and refreshed 8 times per second:
 
 ```

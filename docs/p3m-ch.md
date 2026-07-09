@@ -40,6 +40,7 @@ their contents (matching `chmod -R` semantics). At least one of
 | `--apply` | Actually make the changes. Without it the run is a dry run — there is deliberately no `--dry-run` flag, since that is the default state. |
 | `-j, --threads N` | Worker threads, 1–512. Default: number of online CPUs. |
 | `-o, --output FILE` | Write the CSV change list to `FILE` and show a live progress display. |
+| `-q, --quiet` | Suppress the console listing. Progress (on a terminal) and the end-of-run summary are still shown, and a `-o` file is still written in full — `-q` only silences stdout. |
 | `-h, --help`, `-V, --version` | Usage / version. |
 
 ## MODE syntax
@@ -97,7 +98,7 @@ quoted.
 
 ## Progress display
 
-With `-o` on a terminal, a live status block in the p3m house style is
+With `-o` or `-q` on a terminal, a live status block in the p3m house style is
 shown and refreshed 8 times per second:
 
 ```

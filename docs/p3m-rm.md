@@ -28,6 +28,7 @@ The named paths themselves are removed along with their contents.
 | `--apply` | Actually remove. Without it the run is a dry run — per p3m convention there is no `--dry-run` flag, because that is the default state. |
 | `-j, --threads N` | Worker threads, 1–512. Default: number of online CPUs. |
 | `-o, --output FILE` | Write the CSV listing to `FILE` and show a live progress display. |
+| `-q, --quiet` | Suppress the console listing. Progress (on a terminal) and the end-of-run summary are still shown, and a `-o` file is still written in full — `-q` only silences stdout. |
 | `-h, --help`, `-V, --version` | Usage / version. |
 
 ## Safety
@@ -87,7 +88,7 @@ is non-deterministic; fields with commas/quotes are RFC 4180 quoted.
 
 ## Progress display
 
-With `-o` on a terminal, the p3m live status block is shown
+With `-o` or `-q` on a terminal, the p3m live status block is shown
 (8 refreshes/s) and replaced by a summary when done:
 
 ```

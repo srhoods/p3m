@@ -30,12 +30,14 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_RM_VERSION "1.0.0"
+#define P3M_RM_VERSION "1.1.0"
 
 static struct {
     bool        apply;
     int         nthreads;
     const char *outpath;    /* NULL => stdout */
+    bool        quiet;
+    bool        suppress;   /* quiet without -o: emit nothing at all */
     bool        progress;
 } g;
 
@@ -51,6 +53,8 @@ static p3m_sink  sink;
 static void emit_row(p3m_outbuf *ob, const char *path, char tc,
                      const char *result)
 {
+    if (g.suppress)
+        return;
     if (!p3m_ob_room(ob, 2 * strlen(path) + 128)) {
         p3m_note_error(path, "emit", ENAMETOOLONG);
         return;
@@ -410,7 +414,7 @@ static void prog_draw(double rate, int frame)
         C_DIM, g.apply ? "apply" : "dry-run", C_RESET);
     ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "path", C_RESET, ptr);
     ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "output", C_RESET,
-        g.outpath ? g.outpath : "stdout");
+        g.outpath ? g.outpath : (g.quiet ? "none (-q)" : "stdout"));
     ADD("\x1b[K  %s%-9s%s %-14d %s%-8s%s %s\n",
         C_DIM, "threads", C_RESET, g.nthreads,
         C_DIM, "action", C_RESET, g.apply ? "apply" : "dry-run");
@@ -482,6 +486,8 @@ static void usage(FILE *to)
 "      --apply           actually remove (default is a dry run)\n"
 "  -j, --threads N       worker threads (default: number of online CPUs)\n"
 "  -o, --output FILE     write CSV to FILE; a live progress display is shown\n"
+"  -q, --quiet           suppress the console listing (progress and the\n"
+"                        summary are still shown; a -o file is still written)\n"
 "  -h, --help            show this help and exit\n"
 "  -V, --version         show version and exit\n"
 "\n"
@@ -503,13 +509,14 @@ int main(int argc, char **argv)
         { "apply",   no_argument,       NULL, 1000 },
         { "threads", required_argument, NULL, 'j' },
         { "output",  required_argument, NULL, 'o' },
+        { "quiet",   no_argument,       NULL, 'q' },
         { "help",    no_argument,       NULL, 'h' },
         { "version", no_argument,       NULL, 'V' },
         { 0, 0, 0, 0 }
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "j:o:hV", lopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "j:o:qhV", lopts, NULL)) != -1) {
         switch (c) {
         case 1000:
             g.apply = true;
@@ -527,6 +534,9 @@ int main(int argc, char **argv)
         }
         case 'o':
             g.outpath = optarg;
+            break;
+        case 'q':
+            g.quiet = true;
             break;
         case 'h':
             usage(stdout);
@@ -552,7 +562,8 @@ int main(int argc, char **argv)
         g.nthreads = (n > 0) ? (int)n : 4;
     }
     p3m_color = isatty(STDERR_FILENO);
-    g.progress = g.outpath && isatty(STDERR_FILENO);
+    g.suppress = g.quiet && !g.outpath;
+    g.progress = (g.outpath || g.quiet) && isatty(STDERR_FILENO);
 
     /* expand masks into the root list */
     char **roots = NULL;
@@ -638,7 +649,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "%sp3m-rm: dry run — nothing will be removed "
                 "(use --apply)%s\n", C_DIM, C_RESET);
 
-    fputs(CSV_HEADER, out);
+    if (!g.suppress)
+        fputs(CSV_HEADER, out);
 
     /* seed the queue; the named paths themselves are removed too */
     p3m_stack_init(&stk, g.nthreads);
