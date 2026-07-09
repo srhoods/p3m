@@ -5,4 +5,4 @@ tool, added as the tool is implemented.
 
 | Document | Tool |
 |----------|------|
-| *(coming soon)* | |
+| [p3m-ls.md](p3m-ls.md) | `p3m-ls` — parallel recursive directory lister with CSV output |

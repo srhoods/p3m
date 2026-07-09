@@ -17,7 +17,7 @@ many operations in flight at once.
 
 | Tool | Description | Docs |
 |------|-------------|------|
-| *(coming soon)* | | |
+| `p3m-ls` | Parallel recursive directory lister with CSV output, three detail levels, type filtering and live progress | [docs/p3m-ls.md](docs/p3m-ls.md) |
 
 ## Building
 

@@ -8,9 +8,8 @@ LDFLAGS ?= -pthread
 BIN     := bin
 SRC     := src
 
-# Tools are added here as they are implemented, e.g.:
-# TOOLS := $(BIN)/p3m-chmod
-TOOLS :=
+# Tools are added here as they are implemented
+TOOLS := $(BIN)/p3m-ls
 
 .PHONY: all clean
 
