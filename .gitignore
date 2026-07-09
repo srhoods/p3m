@@ -1,0 +1,10 @@
+# Test data - generated locally, not part of the repo
+testfolder/
+
+# Build artifacts
+bin/
+obj/
+*.o
+*.d
+core
+core.*
