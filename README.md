@@ -18,6 +18,7 @@ many operations in flight at once.
 | Tool | Description | Docs |
 |------|-------------|------|
 | `p3m-ls` | Parallel recursive directory lister with CSV output, three detail levels, type filtering and live progress | [docs/p3m-ls.md](docs/p3m-ls.md) |
+| `p3m-ch` | Parallel chmod + chown + chgrp in a single scan; separate dir/file modes, octal or symbolic, dry-run by default | [docs/p3m-ch.md](docs/p3m-ch.md) |
 
 ## Building
 
