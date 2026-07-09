@@ -10,7 +10,7 @@ SRC     := src
 OBJ     := obj
 
 # Tools are added here as they are implemented
-TOOLS := $(BIN)/p3m-ls $(BIN)/p3m-ch
+TOOLS := $(BIN)/p3m-ls $(BIN)/p3m-ch $(BIN)/p3m-rm
 
 # Shared engine linked into every tool
 CORE := $(OBJ)/p3mcore.o

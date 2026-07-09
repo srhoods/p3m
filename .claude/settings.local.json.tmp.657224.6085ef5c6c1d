@@ -31,7 +31,14 @@
       "Bash(touch __TRACKED_VAR__/chtest/a __TRACKED_VAR__/chtest/sub/b)",
       "Bash(ln -sf a __TRACKED_VAR__/chtest/link)",
       "Bash(chmod 0600 __TRACKED_VAR__/chtest/a __TRACKED_VAR__/chtest/sub/b)",
-      "Bash(git commit -q -m 'Add p3m-ch: parallel chmod + chown + chgrp in a single scan *)"
+      "Bash(git commit -q -m 'Add p3m-ch: parallel chmod + chown + chgrp in a single scan *)",
+      "Bash(sed -i 's#| `-n, --dry-run` | Explicitly request a dry run \\(the default\\). |\\\\n##' docs/p3m-ch.md)",
+      "Bash(python3 -)",
+      "Bash(sed -i 's/^TOOLS := $\\(BIN\\)\\\\/p3m-ls $\\(BIN\\)\\\\/p3m-ch$/TOOLS := $\\(BIN\\)\\\\/p3m-ls $\\(BIN\\)\\\\/p3m-ch $\\(BIN\\)\\\\/p3m-rm/' Makefile)",
+      "Bash(./bin/p3m-ch --help)",
+      "Bash(./bin/p3m-ch -V)",
+      "Bash(git commit -q -m 'p3m-ch: drop --dry-run/-n flag; capture errno before reporting *)",
+      "Bash(git commit -q -m 'Add p3m-rm: parallel recursive remove with hard root guard *)"
     ]
   }
 }
