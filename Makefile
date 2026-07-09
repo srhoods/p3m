@@ -7,19 +7,26 @@ LDFLAGS ?= -pthread
 
 BIN     := bin
 SRC     := src
+OBJ     := obj
 
 # Tools are added here as they are implemented
-TOOLS := $(BIN)/p3m-ls
+TOOLS := $(BIN)/p3m-ls $(BIN)/p3m-ch
+
+# Shared engine linked into every tool
+CORE := $(OBJ)/p3mcore.o
 
 .PHONY: all clean
 
 all: $(TOOLS)
 
-$(BIN):
-	mkdir -p $(BIN)
+$(BIN) $(OBJ):
+	mkdir -p $@
 
-$(BIN)/%: $(SRC)/%.c | $(BIN)
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+$(OBJ)/p3mcore.o: $(SRC)/p3mcore.c $(SRC)/p3mcore.h | $(OBJ)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BIN)/%: $(SRC)/%.c $(CORE) $(SRC)/p3mcore.h | $(BIN)
+	$(CC) $(CFLAGS) -o $@ $< $(CORE) $(LDFLAGS)
 
 clean:
-	rm -rf $(BIN)
+	rm -rf $(BIN) $(OBJ)

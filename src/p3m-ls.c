@@ -11,37 +11,23 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include "p3mcore.h"
+
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <grp.h>
 #include <limits.h>
-#include <pthread.h>
-#include <pwd.h>
-#include <signal.h>
-#include <stdarg.h>
-#include <stdatomic.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 
-#define P3M_LS_VERSION "1.0.0"
+#define P3M_LS_VERSION "1.1.0"
 
 enum detail_mode { MODE_BASIC, MODE_STANDARD, MODE_FULL };
 
 static const char *mode_names[] = { "basic", "standard", "full" };
-
-/* ------------------------------------------------------------------ */
-/* configuration                                                       */
-/* ------------------------------------------------------------------ */
 
 static struct {
     enum detail_mode mode;
@@ -49,365 +35,18 @@ static struct {
     bool             no_dirs;
     unsigned         typemask;   /* output filter, one bit per DT_* value */
     const char      *outpath;    /* NULL => stdout */
-    FILE            *out;
-    bool             progress;   /* live progress display active */
-    bool             color;      /* ANSI colour on stderr */
+    bool             progress;
 } g = { .mode = MODE_BASIC, .typemask = ~0u };
-
-/* ------------------------------------------------------------------ */
-/* shared counters                                                     */
-/* ------------------------------------------------------------------ */
 
 static _Atomic uint64_t n_files;   /* non-directory entries scanned      */
 static _Atomic uint64_t n_dirs;    /* directories scanned                */
-static _Atomic uint64_t n_errors;
 static _Atomic uint64_t n_bytes;   /* aggregate size of regular files    */
-static atomic_bool      write_failed;
-static atomic_bool      scanning;
+
+static p3m_stack stk;
+static p3m_sink  sink;
 
 /* ------------------------------------------------------------------ */
-/* error log: keep the first few messages for the end-of-run report    */
-/* ------------------------------------------------------------------ */
-
-#define ERRLOG_MAX 24
-static char           *errlog[ERRLOG_MAX];
-static int             errlog_n;
-static pthread_mutex_t errlog_mu = PTHREAD_MUTEX_INITIALIZER;
-
-static void note_error(const char *path, const char *what, int err)
-{
-    atomic_fetch_add_explicit(&n_errors, 1, memory_order_relaxed);
-    pthread_mutex_lock(&errlog_mu);
-    if (errlog_n < ERRLOG_MAX) {
-        char buf[PATH_MAX + 128];
-        snprintf(buf, sizeof buf, "%s: %s: %s", what, path, strerror(err));
-        errlog[errlog_n] = strdup(buf);
-        if (errlog[errlog_n])
-            errlog_n++;
-    }
-    pthread_mutex_unlock(&errlog_mu);
-}
-
-/* ------------------------------------------------------------------ */
-/* "current path" shown by the progress display                        */
-/* ------------------------------------------------------------------ */
-
-static char            cur_path[PATH_MAX];
-static pthread_mutex_t cur_mu = PTHREAD_MUTEX_INITIALIZER;
-
-static void set_current(const char *p)
-{
-    pthread_mutex_lock(&cur_mu);
-    snprintf(cur_path, sizeof cur_path, "%s", p);
-    pthread_mutex_unlock(&cur_mu);
-}
-
-static void get_current(char *dst, size_t n)
-{
-    pthread_mutex_lock(&cur_mu);
-    snprintf(dst, n, "%s", cur_path);
-    pthread_mutex_unlock(&cur_mu);
-}
-
-/* ------------------------------------------------------------------ */
-/* work queue: LIFO stack of directory paths (LIFO keeps memory low)   */
-/* ------------------------------------------------------------------ */
-
-static struct {
-    char           **items;
-    size_t           len, cap;
-    int              idle;
-    int              nthreads;
-    bool             done;
-    pthread_mutex_t  mu;
-    pthread_cond_t   cv;
-} stk = { .mu = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
-
-static void stack_push_batch(char **paths, size_t n)
-{
-    if (!n)
-        return;
-    pthread_mutex_lock(&stk.mu);
-    if (stk.len + n > stk.cap) {
-        size_t nc = stk.cap ? stk.cap : 256;
-        while (nc < stk.len + n)
-            nc *= 2;
-        char **ni = realloc(stk.items, nc * sizeof *ni);
-        if (!ni) {
-            pthread_mutex_unlock(&stk.mu);
-            for (size_t i = 0; i < n; i++) {
-                note_error(paths[i], "queue", ENOMEM);
-                free(paths[i]);
-            }
-            return;
-        }
-        stk.items = ni;
-        stk.cap = nc;
-    }
-    memcpy(stk.items + stk.len, paths, n * sizeof *paths);
-    stk.len += n;
-    if (n == 1)
-        pthread_cond_signal(&stk.cv);
-    else
-        pthread_cond_broadcast(&stk.cv);
-    pthread_mutex_unlock(&stk.mu);
-}
-
-/* Pop a directory to scan; returns NULL when the whole walk is finished. */
-static char *stack_pop(void)
-{
-    pthread_mutex_lock(&stk.mu);
-    while (stk.len == 0 && !stk.done) {
-        stk.idle++;
-        if (stk.idle == stk.nthreads) {
-            stk.done = true;
-            pthread_cond_broadcast(&stk.cv);
-        } else {
-            pthread_cond_wait(&stk.cv, &stk.mu);
-        }
-        stk.idle--;
-    }
-    char *p = NULL;
-    if (stk.len > 0)
-        p = stk.items[--stk.len];
-    pthread_mutex_unlock(&stk.mu);
-    return p;
-}
-
-/* ------------------------------------------------------------------ */
-/* buffered CSV output: per-thread buffers, single mutex on flush      */
-/* ------------------------------------------------------------------ */
-
-#define OB_CAP ((size_t)1 << 20)
-
-typedef struct {
-    char  *buf;
-    size_t len;
-} outbuf_t;
-
-static pthread_mutex_t out_mu = PTHREAD_MUTEX_INITIALIZER;
-
-static void ob_flush(outbuf_t *ob)
-{
-    if (!ob->len)
-        return;
-    pthread_mutex_lock(&out_mu);
-    size_t w = fwrite(ob->buf, 1, ob->len, g.out);
-    pthread_mutex_unlock(&out_mu);
-    if (w != ob->len)
-        atomic_store(&write_failed, true);
-    ob->len = 0;
-}
-
-static inline void ob_puts(outbuf_t *ob, const char *s)
-{
-    size_t n = strlen(s);
-    memcpy(ob->buf + ob->len, s, n);
-    ob->len += n;
-}
-
-static inline void ob_putc(outbuf_t *ob, char c)
-{
-    ob->buf[ob->len++] = c;
-}
-
-static void ob_fmt(outbuf_t *ob, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(ob->buf + ob->len, OB_CAP - ob->len, fmt, ap);
-    va_end(ap);
-    if (n > 0)
-        ob->len += (size_t)n;
-}
-
-/* RFC 4180 quoting: quote fields containing comma, quote, CR or LF. */
-static void ob_csv(outbuf_t *ob, const char *s)
-{
-    if (!s[strcspn(s, ",\"\n\r")]) {
-        ob_puts(ob, s);
-        return;
-    }
-    ob_putc(ob, '"');
-    for (const char *p = s; *p; p++) {
-        if (*p == '"')
-            ob_putc(ob, '"');
-        ob_putc(ob, *p);
-    }
-    ob_putc(ob, '"');
-}
-
-/* ------------------------------------------------------------------ */
-/* uid/gid -> name cache (immutable entries, tiny linear scan)         */
-/* ------------------------------------------------------------------ */
-
-#define IDCACHE_MAX 256
-struct ident { uint32_t id; char name[64]; };
-struct idcache {
-    pthread_mutex_t mu;
-    int             n;
-    struct ident    e[IDCACHE_MAX];
-};
-static struct idcache users  = { .mu = PTHREAD_MUTEX_INITIALIZER };
-static struct idcache groups = { .mu = PTHREAD_MUTEX_INITIALIZER };
-
-static const char *id_name(struct idcache *c, uint32_t id, bool is_user,
-                           char fallback[32])
-{
-    pthread_mutex_lock(&c->mu);
-    for (int i = 0; i < c->n; i++) {
-        if (c->e[i].id == id) {
-            const char *nm = c->e[i].name;   /* entries never change */
-            pthread_mutex_unlock(&c->mu);
-            return nm;
-        }
-    }
-    pthread_mutex_unlock(&c->mu);
-
-    char buf[4096];
-    const char *nm = NULL;
-    if (is_user) {
-        struct passwd pw, *res = NULL;
-        if (!getpwuid_r(id, &pw, buf, sizeof buf, &res) && res)
-            nm = pw.pw_name;
-    } else {
-        struct group gr, *res = NULL;
-        if (!getgrgid_r(id, &gr, buf, sizeof buf, &res) && res)
-            nm = gr.gr_name;
-    }
-
-    pthread_mutex_lock(&c->mu);
-    for (int i = 0; i < c->n; i++) {           /* lost a race? reuse it */
-        if (c->e[i].id == id) {
-            const char *s = c->e[i].name;
-            pthread_mutex_unlock(&c->mu);
-            return s;
-        }
-    }
-    if (c->n < IDCACHE_MAX) {
-        struct ident *e = &c->e[c->n];
-        e->id = id;
-        if (nm)
-            snprintf(e->name, sizeof e->name, "%s", nm);
-        else
-            snprintf(e->name, sizeof e->name, "%u", id);
-        c->n++;
-        pthread_mutex_unlock(&c->mu);
-        return e->name;
-    }
-    pthread_mutex_unlock(&c->mu);
-    snprintf(fallback, 32, "%u", id);
-    return fallback;
-}
-
-/* ------------------------------------------------------------------ */
-/* small formatting helpers                                            */
-/* ------------------------------------------------------------------ */
-
-static char dt_char(unsigned char dt)
-{
-    switch (dt) {
-    case DT_REG:  return 'f';
-    case DT_DIR:  return 'd';
-    case DT_LNK:  return 'l';
-    case DT_BLK:  return 'b';
-    case DT_CHR:  return 'c';
-    case DT_FIFO: return 'p';
-    case DT_SOCK: return 's';
-    default:      return '?';
-    }
-}
-
-static void fmt_perms(mode_t m, char out[11])
-{
-    char t = '?';
-    if      (S_ISREG(m))  t = '-';
-    else if (S_ISDIR(m))  t = 'd';
-    else if (S_ISLNK(m))  t = 'l';
-    else if (S_ISBLK(m))  t = 'b';
-    else if (S_ISCHR(m))  t = 'c';
-    else if (S_ISFIFO(m)) t = 'p';
-    else if (S_ISSOCK(m)) t = 's';
-    out[0] = t;
-    out[1] = (m & S_IRUSR) ? 'r' : '-';
-    out[2] = (m & S_IWUSR) ? 'w' : '-';
-    out[3] = (m & S_ISUID) ? ((m & S_IXUSR) ? 's' : 'S')
-                           : ((m & S_IXUSR) ? 'x' : '-');
-    out[4] = (m & S_IRGRP) ? 'r' : '-';
-    out[5] = (m & S_IWGRP) ? 'w' : '-';
-    out[6] = (m & S_ISGID) ? ((m & S_IXGRP) ? 's' : 'S')
-                           : ((m & S_IXGRP) ? 'x' : '-');
-    out[7] = (m & S_IROTH) ? 'r' : '-';
-    out[8] = (m & S_IWOTH) ? 'w' : '-';
-    out[9] = (m & S_ISVTX) ? ((m & S_IXOTH) ? 't' : 'T')
-                           : ((m & S_IXOTH) ? 'x' : '-');
-    out[10] = '\0';
-}
-
-static void fmt_ts(const struct timespec *ts, char out[64], bool with_ns)
-{
-    struct tm tm;
-    time_t s = ts->tv_sec;
-    gmtime_r(&s, &tm);
-    char base[32];
-    strftime(base, sizeof base, "%Y-%m-%dT%H:%M:%S", &tm);
-    if (with_ns)
-        snprintf(out, 64, "%s.%09ldZ", base, (long)ts->tv_nsec);
-    else
-        snprintf(out, 64, "%sZ", base);
-}
-
-/* 1234567 -> "1,234,567" */
-static char *fmt_u64(uint64_t v, char out[32])
-{
-    char tmp[24];
-    int n = snprintf(tmp, sizeof tmp, "%llu", (unsigned long long)v);
-    int m = n + (n - 1) / 3;
-    out[m] = '\0';
-    for (int ti = n - 1, oi = m - 1, cnt = 0; ti >= 0; ) {
-        out[oi--] = tmp[ti--];
-        if (++cnt == 3 && ti >= 0) {
-            out[oi--] = ',';
-            cnt = 0;
-        }
-    }
-    return out;
-}
-
-static char *fmt_size(uint64_t b, char out[32])
-{
-    static const char *unit[] = { "B", "KiB", "MiB", "GiB", "TiB", "PiB" };
-    double v = (double)b;
-    int i = 0;
-    while (v >= 1024.0 && i < 5) {
-        v /= 1024.0;
-        i++;
-    }
-    if (i == 0)
-        snprintf(out, 32, "%llu B", (unsigned long long)b);
-    else
-        snprintf(out, 32, "%.2f %s", v, unit[i]);
-    return out;
-}
-
-static char *fmt_elapsed(double s, char out[32])
-{
-    if (s < 60.0)
-        snprintf(out, 32, "%.1fs", s);
-    else
-        snprintf(out, 32, "%dm %02ds", (int)(s / 60.0), (int)s % 60);
-    return out;
-}
-
-static double mono_now(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-}
-
-/* ------------------------------------------------------------------ */
-/* CSV row emission                                                    */
+/* CSV row emission                                                     */
 /* ------------------------------------------------------------------ */
 
 static const char *csv_header(void)
@@ -423,90 +62,68 @@ static const char *csv_header(void)
     }
 }
 
-static void emit_entry(outbuf_t *ob, const char *path, unsigned char dt,
+static void emit_entry(p3m_outbuf *ob, const char *path, unsigned char dt,
                        const struct stat *st)
 {
-    size_t need = 2 * strlen(path) + 1024;
-    if (need > OB_CAP) {
-        note_error(path, "emit", ENAMETOOLONG);
+    if (!p3m_ob_room(ob, 2 * strlen(path) + 1024)) {
+        p3m_note_error(path, "emit", ENAMETOOLONG);
         return;
     }
-    if (OB_CAP - ob->len < need)
-        ob_flush(ob);
 
-    ob_csv(ob, path);
+    p3m_ob_csv(ob, path);
     if (g.mode == MODE_BASIC) {
-        ob_putc(ob, '\n');
+        p3m_ob_putc(ob, '\n');
         return;
     }
 
     char ufb[32], gfb[32];
-    const char *owner = id_name(&users, st->st_uid, true, ufb);
-    const char *group = id_name(&groups, st->st_gid, false, gfb);
+    const char *owner = p3m_uid_name(st->st_uid, ufb);
+    const char *group = p3m_gid_name(st->st_gid, gfb);
 
     if (g.mode == MODE_STANDARD) {
         char mt[64];
-        fmt_ts(&st->st_mtim, mt, false);
-        ob_fmt(ob, ",%c,%jd,%04o,", dt_char(dt), (intmax_t)st->st_size,
-               (unsigned)(st->st_mode & 07777));
-        ob_csv(ob, owner);
-        ob_putc(ob, ',');
-        ob_csv(ob, group);
-        ob_fmt(ob, ",%s\n", mt);
+        p3m_fmt_ts(&st->st_mtim, mt, false);
+        p3m_ob_fmt(ob, ",%c,%jd,%04o,", p3m_dt_char(dt),
+                   (intmax_t)st->st_size, (unsigned)(st->st_mode & 07777));
+        p3m_ob_csv(ob, owner);
+        p3m_ob_putc(ob, ',');
+        p3m_ob_csv(ob, group);
+        p3m_ob_fmt(ob, ",%s\n", mt);
         return;
     }
 
     char perms[11], at[64], mt[64], ct[64];
-    fmt_perms(st->st_mode, perms);
-    fmt_ts(&st->st_atim, at, true);
-    fmt_ts(&st->st_mtim, mt, true);
-    fmt_ts(&st->st_ctim, ct, true);
-    ob_fmt(ob, ",%c,%04o,%s,%ju,", dt_char(dt),
-           (unsigned)(st->st_mode & 07777), perms, (uintmax_t)st->st_nlink);
-    ob_csv(ob, owner);
-    ob_fmt(ob, ",%ju,", (uintmax_t)st->st_uid);
-    ob_csv(ob, group);
-    ob_fmt(ob, ",%ju,%jd,%jd,%jd,%ju,%ju,%ju,%s,%s,%s\n",
-           (uintmax_t)st->st_gid, (intmax_t)st->st_size,
-           (intmax_t)st->st_blksize, (intmax_t)st->st_blocks,
-           (uintmax_t)st->st_dev, (uintmax_t)st->st_ino,
-           (uintmax_t)st->st_rdev, at, mt, ct);
+    p3m_fmt_perms(st->st_mode, perms);
+    p3m_fmt_ts(&st->st_atim, at, true);
+    p3m_fmt_ts(&st->st_mtim, mt, true);
+    p3m_fmt_ts(&st->st_ctim, ct, true);
+    p3m_ob_fmt(ob, ",%c,%04o,%s,%ju,", p3m_dt_char(dt),
+               (unsigned)(st->st_mode & 07777), perms,
+               (uintmax_t)st->st_nlink);
+    p3m_ob_csv(ob, owner);
+    p3m_ob_fmt(ob, ",%ju,", (uintmax_t)st->st_uid);
+    p3m_ob_csv(ob, group);
+    p3m_ob_fmt(ob, ",%ju,%jd,%jd,%jd,%ju,%ju,%ju,%s,%s,%s\n",
+               (uintmax_t)st->st_gid, (intmax_t)st->st_size,
+               (intmax_t)st->st_blksize, (intmax_t)st->st_blocks,
+               (uintmax_t)st->st_dev, (uintmax_t)st->st_ino,
+               (uintmax_t)st->st_rdev, at, mt, ct);
 }
 
 /* ------------------------------------------------------------------ */
-/* directory scanning                                                  */
+/* directory scanning                                                   */
 /* ------------------------------------------------------------------ */
 
-static char *path_join(const char *dir, size_t dlen, const char *name)
+static void scan_dir(const char *dirpath, p3m_outbuf *ob)
 {
-    size_t nlen = strlen(name);
-    bool slash = dlen && dir[dlen - 1] == '/';
-    char *p = malloc(dlen + (slash ? 0 : 1) + nlen + 1);
-    if (!p)
-        return NULL;
-    memcpy(p, dir, dlen);
-    size_t o = dlen;
-    if (!slash)
-        p[o++] = '/';
-    memcpy(p + o, name, nlen + 1);
-    return p;
-}
-
-/*
- * Classify, count, filter and emit a single entry; returns true if the
- * caller should descend into it (i.e. it is a directory).
- * `fullpath` is only built when needed.
- */
-static void scan_dir(const char *dirpath, outbuf_t *ob)
-{
-    if (atomic_load_explicit(&write_failed, memory_order_relaxed))
+    if (atomic_load_explicit(&sink.failed, memory_order_relaxed))
         return;                       /* abort: let the queue drain */
 
-    set_current(dirpath);
+    p3m_set_current(dirpath);
 
     DIR *d = opendir(dirpath);
     if (!d) {
-        note_error(dirpath, "opendir", errno);
+        p3m_note_error(dirpath, "opendir", errno);
         return;
     }
     int dfd = dirfd(d);
@@ -531,8 +148,8 @@ static void scan_dir(const char *dirpath, outbuf_t *ob)
 
         if (g.mode != MODE_BASIC || dt == DT_UNKNOWN) {
             if (fstatat(dfd, nm, &st, AT_SYMLINK_NOFOLLOW) != 0) {
-                char *fp = path_join(dirpath, dlen, nm);
-                note_error(fp ? fp : nm, "stat", errno);
+                char *fp = p3m_path_join(dirpath, dlen, nm);
+                p3m_note_error(fp ? fp : nm, "stat", errno);
                 free(fp);
                 errno = 0;
                 continue;
@@ -554,9 +171,9 @@ static void scan_dir(const char *dirpath, outbuf_t *ob)
                     (dt < 32 && (g.typemask & (1u << dt)));
 
         if (emit || isdir) {
-            char *fp = path_join(dirpath, dlen, nm);
+            char *fp = p3m_path_join(dirpath, dlen, nm);
             if (!fp) {
-                note_error(nm, "malloc", ENOMEM);
+                p3m_note_error(nm, "malloc", ENOMEM);
             } else {
                 if (emit)
                     emit_entry(ob, fp, dt, have_st ? &st : NULL);
@@ -565,7 +182,7 @@ static void scan_dir(const char *dirpath, outbuf_t *ob)
                         csub = csub ? csub * 2 : 32;
                         char **ns = realloc(subs, csub * sizeof *ns);
                         if (!ns) {
-                            note_error(fp, "queue", ENOMEM);
+                            p3m_note_error(fp, "queue", ENOMEM);
                             free(fp);
                             errno = 0;
                             continue;
@@ -581,101 +198,71 @@ static void scan_dir(const char *dirpath, outbuf_t *ob)
         errno = 0;
     }
     if (errno)
-        note_error(dirpath, "readdir", errno);
+        p3m_note_error(dirpath, "readdir", errno);
     closedir(d);
 
-    stack_push_batch(subs, nsub);
+    p3m_stack_push_batch(&stk, subs, nsub);
     free(subs);
 }
 
 static void *worker(void *arg)
 {
-    outbuf_t ob = { .buf = malloc(OB_CAP), .len = 0 };
-    if (!ob.buf) {
-        note_error("worker", "malloc", ENOMEM);
-        /* still drain the queue so termination detection works */
+    p3m_outbuf ob;
+    if (p3m_ob_init(&ob, &sink) != 0) {
+        p3m_note_error("worker", "malloc", ENOMEM);
         char *p;
-        while ((p = stack_pop()) != NULL)
+        while ((p = p3m_stack_pop(&stk)) != NULL)
             free(p);
         return arg;
     }
     char *path;
-    while ((path = stack_pop()) != NULL) {
+    while ((path = p3m_stack_pop(&stk)) != NULL) {
         scan_dir(path, &ob);
         free(path);
     }
-    ob_flush(&ob);
-    free(ob.buf);
+    p3m_ob_flush(&ob);
+    p3m_ob_free(&ob);
     return arg;
 }
 
 /* ------------------------------------------------------------------ */
-/* progress display                                                    */
+/* progress display                                                     */
 /* ------------------------------------------------------------------ */
-
-#define C_RESET (g.color ? "\x1b[0m"  : "")
-#define C_BOLD  (g.color ? "\x1b[1m"  : "")
-#define C_DIM   (g.color ? "\x1b[2m"  : "")
-#define C_RED   (g.color ? "\x1b[31m" : "")
-#define C_GREEN (g.color ? "\x1b[32m" : "")
-#define C_CYAN  (g.color ? "\x1b[36m" : "")
 
 #define PROG_LINES 7
 
 static double t_start;
 
-static int term_width(void)
+static uint64_t prog_items(void)
 {
-    struct winsize ws;
-    if (ioctl(STDERR_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
-        return ws.ws_col;
-    return 80;
+    return atomic_load_explicit(&n_files, memory_order_relaxed) +
+           atomic_load_explicit(&n_dirs, memory_order_relaxed);
 }
 
-/* Keep the tail of the path, prefixing an ellipsis, to fit `max` columns. */
-static void trunc_left(const char *s, size_t max, char *out, size_t outsz)
+static void prog_draw(double rate, int frame)
 {
-    size_t len = strlen(s);
-    if (max >= outsz)
-        max = outsz - 1;
-    if (len <= max) {
-        memcpy(out, s, len + 1);
-        return;
-    }
-    /* keep the tail, prefix a single-column UTF-8 ellipsis (3 bytes) */
-    size_t keep = (max > 4) ? max - 1 : 3;
-    if (keep + 4 > outsz)
-        keep = outsz - 4;
-    memcpy(out, "…", 3);
-    memcpy(out + 3, s + (len - keep), keep + 1);
-}
-
-static void progress_draw(bool first, double rate, int frame)
-{
-    static const char *spin[] = { "⠋", "⠙", "⠹", "⠸", "⠼",
-                                  "⠴", "⠦", "⠧", "⠇", "⠏" };
     uint64_t files = atomic_load_explicit(&n_files, memory_order_relaxed);
     uint64_t dirs  = atomic_load_explicit(&n_dirs, memory_order_relaxed);
-    uint64_t errs  = atomic_load_explicit(&n_errors, memory_order_relaxed);
+    uint64_t errs  = atomic_load_explicit(&p3m_nerrors, memory_order_relaxed);
     uint64_t bytes = atomic_load_explicit(&n_bytes, memory_order_relaxed);
 
     char cur[PATH_MAX];
-    get_current(cur, sizeof cur);
+    p3m_get_current(cur, sizeof cur);
     char ptr[512];
-    int pmax = term_width() - 13;
+    int pmax = p3m_term_width() - 13;
     if (pmax > 500)
         pmax = 500;
     if (pmax < 20)
         pmax = 20;
-    trunc_left(cur, (size_t)pmax, ptr, sizeof ptr);
+    p3m_trunc_left(cur, (size_t)pmax, ptr, sizeof ptr);
 
     char fv[32], dv[32], ev[32], rv[32], sv[32], el[32];
-    fmt_u64(files, fv);
-    fmt_u64(dirs, dv);
-    fmt_u64(errs, ev);
-    fmt_u64((uint64_t)(rate + 0.5), rv);
-    fmt_size(bytes, sv);
-    fmt_elapsed(mono_now() - t_start, el);
+    p3m_fmt_u64(files, fv);
+    p3m_fmt_u64(dirs, dv);
+    p3m_fmt_u64(errs, ev);
+    p3m_fmt_u64((uint64_t)(rate + 0.5), rv);
+    p3m_fmt_size(bytes, sv);
+    p3m_fmt_elapsed(p3m_mono_now() - t_start, el);
 
     char ratestr[48];
     snprintf(ratestr, sizeof ratestr, "%s items/s", rv);
@@ -683,10 +270,9 @@ static void progress_draw(bool first, double rate, int frame)
     char buf[4096];
     size_t off = 0;
 #define ADD(...) off += (size_t)snprintf(buf + off, sizeof buf - off, __VA_ARGS__)
-    if (!first)
-        ADD("\x1b[%dA", PROG_LINES);
     ADD("\x1b[K%s%s%s %sp3m-ls%s %s— parallel scan%s\n",
-        C_CYAN, spin[frame % 10], C_RESET, C_BOLD, C_RESET, C_DIM, C_RESET);
+        C_CYAN, p3m_spinner[frame % 10], C_RESET, C_BOLD, C_RESET,
+        C_DIM, C_RESET);
     ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "path", C_RESET, ptr);
     ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "output", C_RESET, g.outpath);
     ADD("\x1b[K  %s%-9s%s %-14d %s%-8s%s %s\n",
@@ -704,73 +290,33 @@ static void progress_draw(bool first, double rate, int frame)
             C_DIM, "size", C_RESET, sv, C_DIM, "elapsed", C_RESET, el);
 #undef ADD
     fwrite(buf, 1, off, stderr);
-    fflush(stderr);
-}
-
-static void *progress_fn(void *arg)
-{
-    fputs("\x1b[?25l", stderr);       /* hide cursor */
-    bool first = true;
-    int frame = 0;
-    double prev_t = mono_now(), rate = 0.0;
-    uint64_t prev_items = 0;
-
-    while (atomic_load(&scanning)) {
-        double t = mono_now();
-        uint64_t items =
-            atomic_load_explicit(&n_files, memory_order_relaxed) +
-            atomic_load_explicit(&n_dirs, memory_order_relaxed);
-        double dt = t - prev_t;
-        if (dt > 1e-4) {
-            double inst = (double)(items - prev_items) / dt;
-            rate = first ? inst : rate * 0.7 + inst * 0.3;
-        }
-        prev_t = t;
-        prev_items = items;
-        progress_draw(first, rate, frame++);
-        first = false;
-        struct timespec ts = { 0, 125 * 1000 * 1000 };
-        nanosleep(&ts, NULL);
-    }
-    /* replace the live block with the final summary printed by main() */
-    if (!first)
-        fprintf(stderr, "\x1b[%dA\x1b[J", PROG_LINES);
-    fputs("\x1b[?25h", stderr);       /* show cursor */
-    fflush(stderr);
-    return arg;
-}
-
-static void on_signal(int sig)
-{
-    /* restore the cursor before dying mid-progress-display */
-    ssize_t r = write(STDERR_FILENO, "\x1b[?25h\n", 7);
-    (void)r;
-    signal(sig, SIG_DFL);
-    raise(sig);
 }
 
 /* ------------------------------------------------------------------ */
-/* summary                                                             */
+/* summary                                                              */
 /* ------------------------------------------------------------------ */
 
 static void print_summary(double elapsed)
 {
     uint64_t files = atomic_load(&n_files);
     uint64_t dirs  = atomic_load(&n_dirs);
-    uint64_t errs  = atomic_load(&n_errors);
+    uint64_t errs  = atomic_load(&p3m_nerrors);
     uint64_t bytes = atomic_load(&n_bytes);
 
     char fv[32], dv[32], ev[32], rv[32], sv[32], el[32];
-    fmt_u64(files, fv);
-    fmt_u64(dirs, dv);
-    fmt_u64(errs, ev);
-    fmt_u64(elapsed > 0 ? (uint64_t)((double)(files + dirs) / elapsed) : 0, rv);
-    fmt_size(bytes, sv);
-    fmt_elapsed(elapsed, el);
+    p3m_fmt_u64(files, fv);
+    p3m_fmt_u64(dirs, dv);
+    p3m_fmt_u64(errs, ev);
+    p3m_fmt_u64(elapsed > 0 ? (uint64_t)((double)(files + dirs) / elapsed) : 0,
+                rv);
+    p3m_fmt_size(bytes, sv);
+    p3m_fmt_elapsed(elapsed, el);
 
-    fprintf(stderr, "%s✓%s %sp3m-ls%s complete — %s files · %s dirs · %s%s error%s%s",
+    fprintf(stderr,
+            "%s✓%s %sp3m-ls%s complete — %s files · %s dirs · %s%s error%s%s",
             C_GREEN, C_RESET, C_BOLD, C_RESET, fv, dv,
-            errs ? C_RED : "", ev, errs == 1 ? "" : "s", errs ? C_RESET : "");
+            errs ? C_RED : "", ev, errs == 1 ? "" : "s",
+            errs ? C_RESET : "");
     if (g.mode != MODE_BASIC)
         fprintf(stderr, " · %s", sv);
     fprintf(stderr, "\n  %s in %s (%s items/s)", mode_names[g.mode], el, rv);
@@ -779,22 +325,8 @@ static void print_summary(double elapsed)
     fputc('\n', stderr);
 }
 
-static void print_errors(void)
-{
-    uint64_t errs = atomic_load(&n_errors);
-    if (!errs)
-        return;
-    fprintf(stderr, "%s%llu error%s encountered:%s\n", C_RED,
-            (unsigned long long)errs, errs == 1 ? "" : "s", C_RESET);
-    for (int i = 0; i < errlog_n; i++)
-        fprintf(stderr, "  %s\n", errlog[i]);
-    if (errs > (uint64_t)errlog_n)
-        fprintf(stderr, "  … and %llu more\n",
-                (unsigned long long)(errs - (uint64_t)errlog_n));
-}
-
 /* ------------------------------------------------------------------ */
-/* argument parsing / main                                             */
+/* argument parsing / main                                              */
 /* ------------------------------------------------------------------ */
 
 static int parse_types(const char *s, unsigned *mask)
@@ -916,29 +448,30 @@ int main(int argc, char **argv)
         long n = sysconf(_SC_NPROCESSORS_ONLN);
         g.nthreads = (n > 0) ? (int)n : 4;
     }
-    g.color = isatty(STDERR_FILENO);
+    p3m_color = isatty(STDERR_FILENO);
     g.progress = g.outpath && isatty(STDERR_FILENO);
 
-    /* open the output */
+    FILE *out;
     if (g.outpath) {
-        g.out = fopen(g.outpath, "w");
-        if (!g.out) {
+        out = fopen(g.outpath, "w");
+        if (!out) {
             fprintf(stderr, "p3m-ls: cannot open '%s': %s\n",
                     g.outpath, strerror(errno));
             return 2;
         }
     } else {
-        g.out = stdout;
+        out = stdout;
     }
     static char outvbuf[1 << 20];
-    setvbuf(g.out, outvbuf, _IOFBF, sizeof outvbuf);
+    setvbuf(out, outvbuf, _IOFBF, sizeof outvbuf);
+    p3m_sink_init(&sink, out);
 
-    fputs(csv_header(), g.out);
+    fputs(csv_header(), out);
 
     /* seed the work queue with the root paths */
-    stk.nthreads = g.nthreads;
-    outbuf_t rootob = { .buf = malloc(OB_CAP), .len = 0 };
-    if (!rootob.buf) {
+    p3m_stack_init(&stk, g.nthreads);
+    p3m_outbuf rootob;
+    if (p3m_ob_init(&rootob, &sink) != 0) {
         fprintf(stderr, "p3m-ls: out of memory\n");
         return 2;
     }
@@ -955,10 +488,10 @@ int main(int argc, char **argv)
 
         struct stat st;
         if (lstat(root, &st) != 0) {
-            note_error(root, "stat", errno);
+            p3m_note_error(root, "stat", errno);
             free(root);
         } else if (S_ISDIR(st.st_mode)) {
-            stack_push_batch(&root, 1);
+            p3m_stack_push_batch(&stk, &root, 1);
         } else {
             /* a non-directory root is simply reported as an entry */
             unsigned char dt = IFTODT(st.st_mode);
@@ -970,21 +503,20 @@ int main(int argc, char **argv)
             free(root);
         }
     }
-    ob_flush(&rootob);
-    free(rootob.buf);
+    p3m_ob_flush(&rootob);
+    p3m_ob_free(&rootob);
 
     if (g.progress)
-        set_current("…");
+        p3m_set_current("…");
 
     /* launch */
-    t_start = mono_now();
-    atomic_store(&scanning, true);
+    t_start = p3m_mono_now();
 
-    pthread_t prog;
     if (g.progress) {
-        signal(SIGINT, on_signal);
-        signal(SIGTERM, on_signal);
-        if (pthread_create(&prog, NULL, progress_fn, NULL) != 0)
+        p3m_progress_cfg cfg = {
+            .draw = prog_draw, .items = prog_items, .lines = PROG_LINES
+        };
+        if (p3m_progress_start(&cfg) != 0)
             g.progress = false;
     }
 
@@ -1000,33 +532,28 @@ int main(int argc, char **argv)
         started++;
     }
     if (started < g.nthreads) {
-        /* fewer workers than planned: fix the termination threshold */
-        pthread_mutex_lock(&stk.mu);
-        stk.nthreads = started > 0 ? started : 1;
-        pthread_cond_broadcast(&stk.cv);
-        pthread_mutex_unlock(&stk.mu);
         if (started == 0) {
             fprintf(stderr, "p3m-ls: could not create any worker threads\n");
             return 2;
         }
+        p3m_stack_set_threads(&stk, started);
     }
     for (int i = 0; i < started; i++)
         pthread_join(tids[i], NULL);
     free(tids);
 
-    double elapsed = mono_now() - t_start;
+    double elapsed = p3m_mono_now() - t_start;
 
-    atomic_store(&scanning, false);
     if (g.progress)
-        pthread_join(prog, NULL);
+        p3m_progress_stop();
 
     /* finish the output stream */
-    if (fflush(g.out) != 0 || ferror(g.out))
-        atomic_store(&write_failed, true);
-    if (g.outpath && fclose(g.out) != 0)
-        atomic_store(&write_failed, true);
+    if (fflush(out) != 0 || ferror(out))
+        atomic_store(&sink.failed, true);
+    if (g.outpath && fclose(out) != 0)
+        atomic_store(&sink.failed, true);
 
-    if (atomic_load(&write_failed)) {
+    if (atomic_load(&sink.failed)) {
         fprintf(stderr, "p3m-ls: %swrite error%s on %s — output is incomplete\n",
                 C_RED, C_RESET, g.outpath ? g.outpath : "stdout");
         return 1;
@@ -1034,8 +561,8 @@ int main(int argc, char **argv)
 
     if (g.outpath)
         print_summary(elapsed);
-    print_errors();
-    free(stk.items);
+    p3m_print_errors();
+    p3m_stack_destroy(&stk);
 
-    return atomic_load(&n_errors) ? 1 : 0;
+    return atomic_load(&p3m_nerrors) ? 1 : 0;
 }
