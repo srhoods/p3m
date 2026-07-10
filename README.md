@@ -47,4 +47,4 @@ and validate the tools against their single-threaded coreutils equivalents.
 
 ## Licence
 
-MIT
+MIT — see [LICENSE.md](LICENSE.md).
