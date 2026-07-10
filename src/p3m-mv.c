@@ -58,6 +58,9 @@ static _Atomic uint64_t n_renames;  /* successful rename(2) moves       */
 static _Atomic uint64_t n_bytes;    /* bytes copied (cross-device)      */
 static _Atomic uint64_t n_skipped;  /* existing destinations untouched  */
 static _Atomic uint64_t n_left;     /* source dirs left (skips inside)  */
+static _Atomic bool     fixing;     /* in the finalize pass             */
+static _Atomic uint64_t n_fixed;    /* finalize ops done so far         */
+static _Atomic uint64_t n_fix_total;
 
 static p3m_stack stk;
 static p3m_sink  sink;
@@ -182,6 +185,7 @@ static void dirfix_apply(void)
     qsort(dfx, n_dfx, sizeof *dfx, depth_desc_dfx);
     for (size_t i = 0; i < n_dfx; i++) {
         struct dirfix *f = &dfx[i];
+        p3m_set_current(f->path);
         if (chown(f->path, f->uid, f->gid) != 0 &&
             errno != EPERM && errno != EINVAL)
             p3m_note_error(f->path, "chown", errno);
@@ -189,6 +193,7 @@ static void dirfix_apply(void)
             p3m_note_error(f->path, "chmod", errno);
         if (utimensat(AT_FDCWD, f->path, f->ts, 0) != 0)
             p3m_note_error(f->path, "utimens", errno);
+        atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
         free(f->path);
     }
     free(dfx);
@@ -202,12 +207,14 @@ static void remove_srcdirs(void)
     bool had_leftovers = atomic_load(&n_skipped) > 0 ||
                          atomic_load(&p3m_nerrors) > 0;
     for (size_t i = 0; i < n_rml; i++) {
+        p3m_set_current(rml[i].path);
         if (rmdir(rml[i].path) != 0 && errno != ENOENT) {
             if (errno == ENOTEMPTY && had_leftovers)
                 atomic_fetch_add(&n_left, 1);
             else
                 p3m_note_error(rml[i].path, "rmdir", errno);
         }
+        atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
         free(rml[i].path);
     }
     free(rml);
@@ -734,7 +741,8 @@ static double t_start;
 static uint64_t prog_items(void)
 {
     return atomic_load_explicit(&n_files, memory_order_relaxed) +
-           atomic_load_explicit(&n_dirs, memory_order_relaxed);
+           atomic_load_explicit(&n_dirs, memory_order_relaxed) +
+           atomic_load_explicit(&n_fixed, memory_order_relaxed);
 }
 
 static void prog_draw(double rate, int frame)
@@ -744,6 +752,7 @@ static void prog_draw(double rate, int frame)
     uint64_t errs  = atomic_load_explicit(&p3m_nerrors, memory_order_relaxed);
     uint64_t bytes = atomic_load_explicit(&n_bytes, memory_order_relaxed);
     uint64_t ren   = atomic_load_explicit(&n_renames, memory_order_relaxed);
+    bool     fx    = atomic_load(&fixing);
 
     char cur[PATH_MAX];
     p3m_get_current(cur, sizeof cur);
@@ -769,7 +778,13 @@ static void prog_draw(double rate, int frame)
 
     char ratestr[48], sizestr[80];
     snprintf(ratestr, sizeof ratestr, "%s items/s", rv);
-    if (g.apply)
+    if (fx) {
+        char xv[32], xt[32];
+        p3m_fmt_u64(atomic_load_explicit(&n_fixed, memory_order_relaxed), xv);
+        p3m_fmt_u64(atomic_load_explicit(&n_fix_total,
+                                         memory_order_relaxed), xt);
+        snprintf(sizestr, sizeof sizestr, "%s / %s dirs", xv, xt);
+    } else if (g.apply)
         snprintf(sizestr, sizeof sizestr, "%s · %s/s", sv, tv);
     else
         snprintf(sizestr, sizeof sizestr, "%s to copy", sv);
@@ -785,14 +800,16 @@ static void prog_draw(double rate, int frame)
         g.outpath ? g.outpath : "none (-q)");
     ADD("\x1b[K  %s%-9s%s %-14d %s%-8s%s %s\n",
         C_DIM, "threads", C_RESET, g.nthreads,
-        C_DIM, "action", C_RESET, g.apply ? "apply" : "dry-run");
+        C_DIM, "action", C_RESET,
+        fx ? "finalizing dir metadata" : g.apply ? "apply" : "dry-run");
     ADD("\x1b[K  %s%-9s%s %-14s %s%-8s%s %s\n",
         C_DIM, "files", C_RESET, fv, C_DIM, "dirs", C_RESET, dv);
     ADD("\x1b[K  %s%-9s%s %-14s %s%-8s%s %s%s%s\n",
         C_DIM, "renames", C_RESET, nv, C_DIM, "errors", C_RESET,
         errs ? C_RED : "", ev, errs ? C_RESET : "");
     ADD("\x1b[K  %s%-9s%s %-22s %s%-8s%s %s\n",
-        C_DIM, "size", C_RESET, sizestr, C_DIM, "elapsed", C_RESET, el);
+        C_DIM, fx ? "finalize" : "size", C_RESET, sizestr,
+        C_DIM, "elapsed", C_RESET, el);
 #undef ADD
     fwrite(buf, 1, off, stderr);
     (void)ratestr;
@@ -1192,6 +1209,8 @@ int main(int argc, char **argv)
     free(tids);
 
     if (g.apply) {
+        atomic_store(&n_fix_total, n_dfx + n_rml);
+        atomic_store(&fixing, true);
         dirfix_apply();       /* destination metadata, deepest first */
         remove_srcdirs();     /* emptied source directories          */
     }

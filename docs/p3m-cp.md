@@ -103,6 +103,25 @@ During `--apply` the size line shows live throughput:
   size      8.02 GiB · 412 MiB/s    elapsed  19.4s
 ```
 
+Once all data is copied, `--apply` runs a final pass that applies each
+created directory's permanent mode (and, with `-p`, ownership and
+timestamps) deepest-first. On trees with many directories this phase
+takes real time — `strace` would show a stream of `chmod`/`chown`
+calls — so the display switches to report it rather than appearing to
+hang: the `action` field reads `finalizing dir metadata`, the path
+line tracks the directory being finalized, and the bottom line counts
+it down:
+
+```
+⠧ p3m-cp — parallel copy
+  path      …/dst/deep/subdir
+  output    copied.csv
+  threads   4              action   finalizing dir metadata
+  files     10,000         dirs     40,201
+  rate      100,355 items/s errors   0
+  finalize  17,411 / 40,201 dirs    elapsed  21.3s
+```
+
 The summary always prints; a dry run adds a reminder that `--apply` is
 required, and skipped conflicts add a `--overwrite` hint:
 

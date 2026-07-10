@@ -120,6 +120,25 @@ throughput:
   size      1.9 GiB · 320 MiB/s    elapsed  6.1s
 ```
 
+After the walk, `--apply` runs a finalize pass: created destination
+directories get their permanent mode, ownership and timestamps
+(deepest first), then the emptied source directories are removed. On
+trees with many directories this takes real time, so instead of
+appearing to hang the display switches to report it — `action` reads
+`finalizing dir metadata`, the path line tracks the directory being
+worked on, and the bottom line counts the pass down (the total covers
+both the metadata fix-ups and the source-directory removals):
+
+```
+⠧ p3m-mv — parallel move
+  path      …/src/deep/subdir
+  output    moved.csv
+  threads   4              action   finalizing dir metadata
+  files     10,000         dirs     40,201
+  renames   0              errors   0
+  finalize  48,211 / 80,402 dirs   elapsed  9.8s
+```
+
 The summary always prints; a dry run adds the `--apply` reminder,
 skipped conflicts add the `--overwrite` hint, and any source
 directories kept because they still hold skipped entries are counted.
