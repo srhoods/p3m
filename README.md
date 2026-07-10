@@ -22,6 +22,7 @@ many operations in flight at once.
 | `p3m-rm` | Parallel recursive remove with glob masks, dry-run by default, non-overridable root guard, never follows symlinks | [docs/p3m-rm.md](docs/p3m-rm.md) |
 | `p3m-du` | Parallel disk usage with GNU du-compatible options (`-s -c -d -h --si -X -B -b`), hard-link dedup, never follows symlinks | [docs/p3m-du.md](docs/p3m-du.md) |
 | `p3m-cp` | Parallel copy (recursive like `cp -R`), dry-run by default, skips existing destinations unless `--overwrite`, `-p` metadata preservation, never follows symlinks | [docs/p3m-cp.md](docs/p3m-cp.md) |
+| `p3m-mv` | Parallel move: single-rename fast path, parallel cross-device copy+delete, merges into existing trees (mv refuses), dry-run by default, hard root guard | [docs/p3m-mv.md](docs/p3m-mv.md) |
 
 ## Building
 

@@ -6,6 +6,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <grp.h>
 #include <limits.h>
 #include <pwd.h>
@@ -17,6 +18,58 @@
 #include <unistd.h>
 
 bool p3m_color;
+
+/* ------------------------------------------------------------------ */
+/* file content copy                                                    */
+/* ------------------------------------------------------------------ */
+
+#define P3M_COPY_CHUNK ((size_t)4 << 20)
+
+static __thread char *p3m_cpbuf;    /* lazy 1 MiB read/write fallback */
+
+int p3m_copy_fd(int in, int out, _Atomic uint64_t *bytes)
+{
+    for (;;) {
+        ssize_t r = copy_file_range(in, NULL, out, NULL, P3M_COPY_CHUNK, 0);
+        if (r > 0) {
+            if (bytes)
+                atomic_fetch_add_explicit(bytes, (uint64_t)r,
+                                          memory_order_relaxed);
+            continue;
+        }
+        if (r == 0)
+            return 0;
+        if (errno != EINVAL && errno != EXDEV &&
+            errno != ENOSYS && errno != EOPNOTSUPP)
+            return -1;
+        break;                                /* fall back to read/write */
+    }
+    if (!p3m_cpbuf) {
+        p3m_cpbuf = malloc(1 << 20);
+        if (!p3m_cpbuf) {
+            errno = ENOMEM;
+            return -1;
+        }
+    }
+    for (;;) {
+        ssize_t r = read(in, p3m_cpbuf, 1 << 20);
+        if (r == 0)
+            return 0;
+        if (r < 0)
+            return -1;
+        char *p = p3m_cpbuf;
+        while (r > 0) {
+            ssize_t w = write(out, p, (size_t)r);
+            if (w < 0)
+                return -1;
+            p += w;
+            r -= w;
+        }
+        if (bytes)
+            atomic_fetch_add_explicit(bytes, (uint64_t)(p - p3m_cpbuf),
+                                      memory_order_relaxed);
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /* formatting helpers                                                   */

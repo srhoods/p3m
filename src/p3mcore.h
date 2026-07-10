@@ -98,6 +98,12 @@ void p3m_ob_fmt(p3m_outbuf *ob, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 void p3m_ob_csv(p3m_outbuf *ob, const char *s);    /* RFC 4180 quoting */
 
+/* ---- file content copy ----------------------------------------------- */
+
+/* copy open fd in -> out (copy_file_range, falling back to read/write);
+ * adds bytes copied to *bytes if non-NULL; 0 ok, -1 with errno set */
+int p3m_copy_fd(int in, int out, _Atomic uint64_t *bytes);
+
 /* ---- uid/gid name caches and resolvers ------------------------------ */
 
 const char *p3m_uid_name(uid_t id, char fallback[32]);

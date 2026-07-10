@@ -169,57 +169,6 @@ static void emit_row(p3m_outbuf *ob, const char *src, char type,
     p3m_ob_putc(ob, '\n');
 }
 
-/* ------------------------------------------------------------------ */
-/* file content copy                                                    */
-/* ------------------------------------------------------------------ */
-
-#define CP_CHUNK ((size_t)4 << 20)
-
-static __thread char *cpbuf;                  /* fallback read/write buf */
-
-/* copies open fd in -> out; returns 0 ok, -1 with errno set */
-static int copy_content(int in, int out)
-{
-    for (;;) {
-        ssize_t r = copy_file_range(in, NULL, out, NULL, CP_CHUNK, 0);
-        if (r > 0) {
-            atomic_fetch_add_explicit(&n_bytes, (uint64_t)r,
-                                      memory_order_relaxed);
-            continue;
-        }
-        if (r == 0)
-            return 0;
-        if (errno != EINVAL && errno != EXDEV &&
-            errno != ENOSYS && errno != EOPNOTSUPP)
-            return -1;
-        break;                                /* fall back to read/write */
-    }
-    if (!cpbuf) {
-        cpbuf = malloc(1 << 20);
-        if (!cpbuf) {
-            errno = ENOMEM;
-            return -1;
-        }
-    }
-    for (;;) {
-        ssize_t r = read(in, cpbuf, 1 << 20);
-        if (r == 0)
-            return 0;
-        if (r < 0)
-            return -1;
-        char *p = cpbuf;
-        while (r > 0) {
-            ssize_t w = write(out, p, (size_t)r);
-            if (w < 0)
-                return -1;
-            p += w;
-            r -= w;
-        }
-        atomic_fetch_add_explicit(&n_bytes, (uint64_t)(p - cpbuf),
-                                  memory_order_relaxed);
-    }
-}
-
 /* apply -p metadata to an fd; chown first (chown clears set-id bits) */
 static void preserve_fd(int fd, const char *dpath, const struct stat *st)
 {
@@ -306,7 +255,7 @@ static void copy_entry(int srcdirfd, const char *name, const char *spath,
             emit_row(ob, spath, type, size, dpath, "failed: create");
             return;
         }
-        int rc = copy_content(in, out);
+        int rc = p3m_copy_fd(in, out, &n_bytes);
         int e = errno;
         close(in);
         if (rc != 0) {
