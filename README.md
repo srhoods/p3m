@@ -20,6 +20,7 @@ many operations in flight at once.
 | `p3m-ls` | Parallel recursive directory lister with CSV output, three detail levels, type filtering and live progress | [docs/p3m-ls.md](docs/p3m-ls.md) |
 | `p3m-ch` | Parallel chmod + chown + chgrp in a single scan; separate dir/file modes, octal or symbolic, dry-run by default | [docs/p3m-ch.md](docs/p3m-ch.md) |
 | `p3m-rm` | Parallel recursive remove with glob masks, dry-run by default, non-overridable root guard, never follows symlinks | [docs/p3m-rm.md](docs/p3m-rm.md) |
+| `p3m-du` | Parallel disk usage with GNU du-compatible options (`-s -c -d -h --si -X -B -b`), hard-link dedup, never follows symlinks | [docs/p3m-du.md](docs/p3m-du.md) |
 
 ## Building
 

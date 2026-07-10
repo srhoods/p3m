@@ -8,3 +8,4 @@ tool, added as the tool is implemented.
 | [p3m-ls.md](p3m-ls.md) | `p3m-ls` — parallel recursive directory lister with CSV output |
 | [p3m-ch.md](p3m-ch.md) | `p3m-ch` — parallel chmod + chown + chgrp in a single scan |
 | [p3m-rm.md](p3m-rm.md) | `p3m-rm` — parallel recursive remove with hard root guard |
+| [p3m-du.md](p3m-du.md) | `p3m-du` — parallel disk usage with GNU du-compatible options |
