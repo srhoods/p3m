@@ -24,6 +24,7 @@ many operations in flight at once.
 | `p3m-cp` | Parallel copy (recursive like `cp -R`), dry-run by default, skips existing destinations unless `--overwrite`, `-p` metadata preservation, never follows symlinks | [docs/p3m-cp.md](docs/p3m-cp.md) |
 | `p3m-mv` | Parallel move: single-rename fast path, parallel cross-device copy+delete, merges into existing trees (mv refuses), dry-run by default, hard root guard | [docs/p3m-mv.md](docs/p3m-mv.md) |
 | `p3m-find` | Parallel find: classic expression grammar (`! ( ) -a -o`), common tests (`-name -type -size -mtime -perm -user -empty -regex …`), lazy stat, `-print0`; deliberately no `-delete`/`-exec` | [docs/p3m-find.md](docs/p3m-find.md) |
+| `p3m-comp` | Parallel directory comparison: names, types, sizes and metadata by default, byte-exact content verification with `-c` (size checked first — content read skipped when sizes differ), diff-like exit codes and a plain-language verdict | [docs/p3m-comp.md](docs/p3m-comp.md) |
 
 ## Building
 

@@ -12,3 +12,4 @@ tool, added as the tool is implemented.
 | [p3m-cp.md](p3m-cp.md) | `p3m-cp` — parallel copy, dry-run by default, never overwrites without --overwrite |
 | [p3m-mv.md](p3m-mv.md) | `p3m-mv` — parallel move: rename fast path, parallel cross-device copy+delete, tree merging |
 | [p3m-find.md](p3m-find.md) | `p3m-find` — parallel find with the classic expression grammar and lazy stat |
+| [p3m-comp.md](p3m-comp.md) | `p3m-comp` — parallel directory comparison with byte-exact content verification |
