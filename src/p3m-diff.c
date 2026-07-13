@@ -1,5 +1,5 @@
 /*
- * p3m-comp — parallel directory tree comparison
+ * p3m-diff — parallel directory tree comparison
  *
  * Walks two directory trees in lockstep with a pool of worker threads
  * and reports every difference: entries present on only one side, type
@@ -31,7 +31,7 @@
 #include <sys/sysmacros.h>
 #include <unistd.h>
 
-#define P3M_COMP_VERSION "1.0.0"
+#define P3M_DIFF_VERSION "1.0.0"
 
 static struct {
     bool         checksum;    /* -c: also compare file contents        */
@@ -450,7 +450,7 @@ static void free_entries(struct ent *v, size_t n)
     free(v);
 }
 
-static void comp_dir(const char *rel, p3m_outbuf *ob)
+static void diff_dir(const char *rel, p3m_outbuf *ob)
 {
     if (atomic_load_explicit(&sink.failed, memory_order_relaxed))
         return;                   /* abort: let the queue drain */
@@ -542,7 +542,7 @@ static void *worker(void *arg)
     }
     char *rel;
     while ((rel = p3m_stack_pop(&stk)) != NULL) {
-        comp_dir(rel, &ob);
+        diff_dir(rel, &ob);
         free(rel);
     }
     p3m_ob_flush(&ob);
@@ -605,7 +605,7 @@ static void prog_draw(double rate, int frame)
     char buf[4096];
     size_t off = 0;
 #define ADD(...) off += (size_t)snprintf(buf + off, sizeof buf - off, __VA_ARGS__)
-    ADD("\x1b[K%s%s%s %sp3m-comp%s %s— parallel compare%s\n",
+    ADD("\x1b[K%s%s%s %sp3m-diff%s %s— parallel compare%s\n",
         C_CYAN, p3m_spinner[frame % 10], C_RESET, C_BOLD, C_RESET,
         C_DIM, C_RESET);
     ADD("\x1b[K  %s%-9s%s %s\n", C_DIM, "path", C_RESET, ptr);
@@ -653,7 +653,7 @@ static void print_summary(double elapsed)
 
     bool same = diffs == 0;
     fprintf(stderr,
-            "%s%s%s %sp3m-comp%s complete — %s files · %s dirs · "
+            "%s%s%s %sp3m-diff%s complete — %s files · %s dirs · "
             "%s%s difference%s%s · %s%s error%s%s\n",
             same ? C_GREEN : C_RED, same ? "✓" : "✗", C_RESET,
             C_BOLD, C_RESET, fv, dv,
@@ -707,7 +707,7 @@ static void print_summary(double elapsed)
 static void usage(FILE *to)
 {
     fputs(
-"Usage: p3m-comp [OPTIONS] LEFT RIGHT\n"
+"Usage: p3m-diff [OPTIONS] LEFT RIGHT\n"
 "\n"
 "Compare two directory trees in parallel and report the likelihood\n"
 "that their contents are the same. By default entry names, types,\n"
@@ -760,7 +760,7 @@ int main(int argc, char **argv)
             char *end;
             long v = strtol(optarg, &end, 10);
             if (*end || v < 1 || v > 512) {
-                fprintf(stderr, "p3m-comp: invalid thread count '%s'\n",
+                fprintf(stderr, "p3m-diff: invalid thread count '%s'\n",
                         optarg);
                 return 2;
             }
@@ -777,7 +777,7 @@ int main(int argc, char **argv)
             usage(stdout);
             return 0;
         case 'V':
-            printf("p3m-comp %s\n", P3M_COMP_VERSION);
+            printf("p3m-diff %s\n", P3M_DIFF_VERSION);
             return 0;
         default:
             usage(stderr);
@@ -786,7 +786,7 @@ int main(int argc, char **argv)
     }
 
     if (argc - optind != 2) {
-        fprintf(stderr, "p3m-comp: expected exactly two directories, "
+        fprintf(stderr, "p3m-diff: expected exactly two directories, "
                 "LEFT and RIGHT\n");
         usage(stderr);
         return 2;
@@ -804,7 +804,7 @@ int main(int argc, char **argv)
     g.left  = strdup(argv[optind]);
     g.right = strdup(argv[optind + 1]);
     if (!g.left || !g.right) {
-        fprintf(stderr, "p3m-comp: out of memory\n");
+        fprintf(stderr, "p3m-diff: out of memory\n");
         return 2;
     }
     for (int k = 0; k < 2; k++) {
@@ -818,19 +818,19 @@ int main(int argc, char **argv)
 
     struct stat sl, sr;
     if (lstat(g.left, &sl) != 0) {
-        fprintf(stderr, "p3m-comp: %s: %s\n", g.left, strerror(errno));
+        fprintf(stderr, "p3m-diff: %s: %s\n", g.left, strerror(errno));
         return 2;
     }
     if (lstat(g.right, &sr) != 0) {
-        fprintf(stderr, "p3m-comp: %s: %s\n", g.right, strerror(errno));
+        fprintf(stderr, "p3m-diff: %s: %s\n", g.right, strerror(errno));
         return 2;
     }
     if (!S_ISDIR(sl.st_mode) || !S_ISDIR(sr.st_mode)) {
-        fprintf(stderr, "p3m-comp: both arguments must be directories\n");
+        fprintf(stderr, "p3m-diff: both arguments must be directories\n");
         return 2;
     }
     if (sl.st_dev == sr.st_dev && sl.st_ino == sr.st_ino) {
-        fprintf(stderr, "p3m-comp: LEFT and RIGHT are the same "
+        fprintf(stderr, "p3m-diff: LEFT and RIGHT are the same "
                 "directory\n");
         return 2;
     }
@@ -840,7 +840,7 @@ int main(int argc, char **argv)
     if (g.outpath) {
         out = fopen(g.outpath, "w");
         if (!out) {
-            fprintf(stderr, "p3m-comp: cannot open %s: %s\n",
+            fprintf(stderr, "p3m-diff: cannot open %s: %s\n",
                     g.outpath, strerror(errno));
             return 2;
         }
@@ -867,7 +867,7 @@ int main(int argc, char **argv)
     p3m_stack_init(&stk, g.nthreads);
     p3m_outbuf rootob;
     if (p3m_ob_init(&rootob, &sink) != 0) {
-        fprintf(stderr, "p3m-comp: out of memory\n");
+        fprintf(stderr, "p3m-diff: out of memory\n");
         return 2;
     }
     atomic_fetch_add(&n_dirs, 1);
@@ -877,7 +877,7 @@ int main(int argc, char **argv)
 
     char *rootrel = strdup("");
     if (!rootrel) {
-        fprintf(stderr, "p3m-comp: out of memory\n");
+        fprintf(stderr, "p3m-diff: out of memory\n");
         return 2;
     }
     p3m_stack_push_batch(&stk, &rootrel, 1);
@@ -885,7 +885,7 @@ int main(int argc, char **argv)
     /* launch */
     pthread_t *tids = calloc((size_t)g.nthreads, sizeof *tids);
     if (!tids) {
-        fprintf(stderr, "p3m-comp: out of memory\n");
+        fprintf(stderr, "p3m-diff: out of memory\n");
         return 2;
     }
     int started = 0;
@@ -896,7 +896,7 @@ int main(int argc, char **argv)
     }
     if (started < g.nthreads) {
         if (started == 0) {
-            fprintf(stderr, "p3m-comp: could not create any worker "
+            fprintf(stderr, "p3m-diff: could not create any worker "
                     "threads\n");
             return 2;
         }
@@ -918,7 +918,7 @@ int main(int argc, char **argv)
         atomic_store(&sink.failed, true);
 
     if (atomic_load(&sink.failed)) {
-        fprintf(stderr, "p3m-comp: %swrite error%s on %s — output is "
+        fprintf(stderr, "p3m-diff: %swrite error%s on %s — output is "
                 "incomplete\n",
                 C_RED, C_RESET, g.outpath ? g.outpath : "stdout");
         return 2;

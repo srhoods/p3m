@@ -1,6 +1,6 @@
-# p3m-comp — parallel directory comparison
+# p3m-diff — parallel directory comparison
 
-`p3m-comp` compares two directory trees with a pool of worker threads
+`p3m-diff` compares two directory trees with a pool of worker threads
 and reports the likelihood that their contents are the same. By
 default it compares entry **names**, **types**, **sizes** (regular
 files) and **metadata** — mode, owner, group and mtime — which is fast
@@ -13,7 +13,7 @@ The tool is read-only: nothing on either side is ever modified.
 ## Synopsis
 
 ```
-p3m-comp [OPTIONS] LEFT RIGHT
+p3m-diff [OPTIONS] LEFT RIGHT
 ```
 
 Both arguments must be directories. Exit status is diff-like:
@@ -82,7 +82,7 @@ The summary always prints, with a per-category breakdown when
 differences were found, and ends with the verdict:
 
 ```
-✓ p3m-comp complete — 10,000 files · 1,002 dirs · 0 differences · 0 errors
+✓ p3m-diff complete — 10,000 files · 1,002 dirs · 0 differences · 0 errors
   0.01s (493,732 items/s)
   trees are very likely identical — names, types, sizes and metadata all match (add -c to verify file contents)
 ```
@@ -95,7 +95,7 @@ differences were found, and ends with the verdict:
 - **differences** — *"trees differ"*, with the breakdown:
 
 ```
-✗ p3m-comp complete — 12 files · 5 dirs · 8 differences · 0 errors
+✗ p3m-diff complete — 12 files · 5 dirs · 8 differences · 0 errors
   2 only in left · 1 only in right · 1 type · 1 size · 0 content · 3 metadata
   0.0s (54,795 items/s)
   trees differ — 8 differences are listed above
@@ -112,7 +112,7 @@ The `diffs` counter is live, and with `-c` the bottom line tracks
 content bytes compared and throughput:
 
 ```
-⠼ p3m-comp — parallel compare
+⠼ p3m-diff — parallel compare
   path      …/testfolder/testdir0042
   output    none (-q)
   threads   4              check    names+meta+size+content
@@ -125,16 +125,16 @@ content bytes compared and throughput:
 
 ```sh
 # Quick verdict: did the copy get everything? (metadata only, fast)
-p3m-comp -q /data/projects /backup/projects
+p3m-diff -q /data/projects /backup/projects
 
 # Verify a migration byte-for-byte before deleting the source
-p3m-comp -cq /old/array/home /new/array/home
+p3m-diff -cq /old/array/home /new/array/home
 
 # Full difference report to CSV with live progress
-p3m-comp -c -o drift.csv /etc /srv/config-snapshot/etc
+p3m-diff -c -o drift.csv /etc /srv/config-snapshot/etc
 
 # Audit a p3m-cp -p copy (compares clean, including dir mtimes)
-p3m-cp --apply -p /src/tree /dst && p3m-comp -cq /src/tree /dst/tree
+p3m-cp --apply -p /src/tree /dst && p3m-diff -cq /src/tree /dst/tree
 ```
 
 ## Performance
@@ -143,7 +143,7 @@ Measured on the project's `testfolder` data set (1,001 directories,
 10,000 × 1 MiB files, 9.77 GiB) against a `cp -a` copy, XFS, 4 cores,
 warm cache:
 
-| Comparison | single-threaded tool | `p3m-comp -j4` | Speed-up |
+| Comparison | single-threaded tool | `p3m-diff -j4` | Speed-up |
 |------------|---------------------:|---------------:|---------:|
 | names + metadata + size (default) | `rsync -an` 0.089 s | 0.014 s | 6.4× |
 | contents (`-c`, 2 × 9.77 GiB read) | `diff -qr` 34.2 s | 26.6 s | 1.3× |
