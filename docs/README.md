@@ -13,3 +13,4 @@ tool, added as the tool is implemented.
 | [p3m-mv.md](p3m-mv.md) | `p3m-mv` — parallel move: rename fast path, parallel cross-device copy+delete, tree merging |
 | [p3m-find.md](p3m-find.md) | `p3m-find` — parallel find with the classic expression grammar and lazy stat |
 | [p3m-diff.md](p3m-diff.md) | `p3m-diff` — parallel directory comparison with byte-exact content verification |
+| [p3m-stats.md](p3m-stats.md) | `p3m-stats` — age and hot/cold statistics from a p3m-ls catalogue |
