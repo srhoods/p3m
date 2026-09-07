@@ -2,9 +2,10 @@
 
 `p3m-stats` reads a CSV catalogue produced by `p3m-ls -m full` (or
 `-m standard`, for mtime-only stats) and reports access and
-modification age statistics: the most recently accessed and most
-recently modified files, and how file count and bytes break down by
-"not touched in over X" age buckets.
+modification age statistics: the most recently accessed, most recently
+modified and largest files; how file count and bytes break down by
+"not touched in over X" age buckets; and a breakdown of file count and
+bytes by extension.
 
 It is a companion to `p3m-ls`, not a directory walker itself — point it
 at a CSV file (or pipe one in) and it produces a report. The CSV is
@@ -34,7 +35,8 @@ p3m-ls -m full /data | p3m-stats -n 50
 
 | Option | Description |
 |--------|-------------|
-| `-n, --top N` | Show the N most recently accessed and N most recently modified files. Default: 20. `-n 0` disables the top lists (histograms only). |
+| `-n, --top N` | Show the N most recently accessed, N most recently modified, and N largest files. Default: 20. `-n 0` disables all three top lists (histograms and extension breakdown are unaffected). |
+| `-e, --top-ext N` | Show the N largest extensions (by bytes) in the extension breakdown. Default: 20. `-e 0` disables the breakdown entirely. |
 | `-o, --output FILE` | Write the report to `FILE` instead of stdout. |
 | `--csv-summary FILE` | Also write the age histogram (both atime and mtime) as CSV to `FILE`. |
 | `--now TIMESTAMP` | Treat `TIMESTAMP` (ISO 8601 UTC, e.g. `2026-09-02T00:00:00Z`) as "now" instead of the wall-clock time, for reproducible reports. |
@@ -81,6 +83,20 @@ Most recently accessed (atime)
 These are computed with a bounded max-heap of size N — memory for the
 top lists is `O(N)`, independent of how many rows are in the input.
 
+### Largest files
+
+The N largest files by size, largest first:
+
+```
+Largest files
+  4.20 GiB  /data/backups/full-2026-08-01.tar
+  1.03 GiB  /data/media/keynote.mp4
+  ...
+```
+
+Computed the same way as the recency lists — a bounded max-heap keyed
+on size, `O(N)` memory regardless of input size.
+
 ### Age histograms
 
 For each of `atime` and `mtime`, file count and total bytes are bucketed
@@ -108,6 +124,40 @@ timestamp is after the "now" reference (clock skew between the machine
 that ran `p3m-ls` and `--now`, or an unset `--now`) is reported
 separately as `future` rather than folded into a bucket.
 
+### Breakdown by extension
+
+File count and bytes for the N largest extensions (by bytes), most
+bytes first:
+
+```
+Breakdown by extension
+  extension             files        bytes  % bytes
+  mp4                  12,204     8.91 TiB   41.20%  [########################]
+  log                  84,331     6.02 TiB   27.84%  [################        ]
+  jpg                  201,918    3.11 TiB   14.38%  [########                ]
+  (none)                 3,442   890.4 GiB    4.02%  [##                      ]
+  ...
+  (other)                8,120   512.0 GiB  (37 more distinct extensions)
+  total                310,000    21.6 TiB
+```
+
+The extension is the substring after the last `.` in the file's base
+name, lowercased (`archive.tar.gz` → `gz`; matches common convention —
+only the final suffix counts). Files with no `.` in the name, or where
+the only `.` is a leading one (dotfiles like `.bashrc`), are grouped
+under `(none)`. Directory rows are excluded, same as the age
+histograms.
+
+Extensions beyond the top N are combined into a `(other)` row rather
+than omitted, so the file/byte totals in the breakdown always add up to
+the report's overall total. Internally this is a bounded hash table
+(capacity in the tens of thousands of distinct extensions); in the
+extremely unlikely case a catalogue has more distinct extensions than
+that (e.g. adversarial or garbage filenames), the excess is folded into
+a separate `(overflow)` row rather than growing memory unboundedly —
+real-world trees have at most a few thousand distinct extensions, so
+this should never be visible in practice.
+
 ### `--csv-summary`
 
 Writes the same histogram data as CSV (`kind,bucket,files,bytes`, one
@@ -127,9 +177,10 @@ Single-threaded (parsing is inherently sequential — CSV rows have no
 useful independent unit larger than a line to parallelise across
 threads for a one-shot aggregation): on a 3,000,000-row `-m full`
 catalogue, `p3m-stats` completes in about 5 seconds with resident
-memory in the low single-digit megabytes. Memory is dominated by two
-fixed-size top-N heaps (`2 × N` entries) and per-column line buffers —
-it does not grow with the number of rows in the input.
+memory in the low single-digit megabytes. Memory is dominated by three
+fixed-size top-N heaps (`3 × N` entries), a bounded extension hash
+table, and per-column line buffers — none of it grows with the number
+of rows in the input.
 
 ## Examples
 
@@ -140,8 +191,11 @@ p3m-ls -m full -o cat.csv /data && p3m-stats cat.csv
 # Streamed, no intermediate file, top 50
 p3m-ls -m full /data | p3m-stats -n 50
 
-# Just the histograms (no top lists), written to a file
-p3m-stats -n 0 -o report.txt cat.csv
+# Just the histograms (no top lists, no extension breakdown), written to a file
+p3m-stats -n 0 -e 0 -o report.txt cat.csv
+
+# Top 100 files everywhere, top 30 extensions
+p3m-stats -n 100 -e 30 cat.csv
 
 # Reproducible report pinned to a specific "now"
 p3m-stats --now 2026-09-01T00:00:00Z cat.csv

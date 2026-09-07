@@ -8,13 +8,16 @@
  *
  *   - the N most recently accessed files (atime) and N most recently
  *     modified files (mtime), with their paths and timestamps
+ *   - the N largest files, with their paths and sizes
  *   - an age histogram for both atime and mtime: how many files/bytes
  *     fall in each "not touched in over X" bucket
+ *   - a breakdown of files by extension: how many files/bytes belong
+ *     to each extension
  *
  * Designed for catalogues with tens of millions of rows: the CSV is
- * read once, line by line, and only fixed-size aggregate state plus two
- * bounded top-N heaps are kept in memory — the row count does not bound
- * memory use.
+ * read once, line by line, and only fixed-size aggregate state, a
+ * handful of bounded top-N heaps and a bounded extension table are kept
+ * in memory — the row count does not bound memory use.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -31,7 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define P3M_STATS_VERSION "1.0.0"
+#define P3M_STATS_VERSION "1.1.0"
 
 /* ------------------------------------------------------------------ */
 /* age buckets                                                          */
@@ -90,7 +93,7 @@ static void hist_add(age_hist *h, int64_t age, uint64_t size)
 }
 
 /* ------------------------------------------------------------------ */
-/* bounded top-N min-heap, keyed on timestamp (keep the N largest)      */
+/* bounded top-N min-heap (keep the N largest by some key)              */
 /* ------------------------------------------------------------------ */
 
 typedef struct {
@@ -100,31 +103,40 @@ typedef struct {
     char    *path;   /* malloc'd */
 } top_item;
 
+/* true if a ranks below b (a is the smaller/older one) — min-heap order */
+typedef bool (*item_cmp)(const top_item *a, const top_item *b);
+
 typedef struct {
     top_item *items;
     int       n, cap;
+    item_cmp  before;
 } top_heap;
 
-static void heap_init(top_heap *h, int cap)
+static bool cmp_by_time(const top_item *a, const top_item *b)
+{
+    if (a->ts != b->ts) return a->ts < b->ts;
+    return a->ns < b->ns;
+}
+
+static bool cmp_by_size(const top_item *a, const top_item *b)
+{
+    return a->size < b->size;
+}
+
+static void heap_init(top_heap *h, int cap, item_cmp cmp)
 {
     h->items = cap ? calloc((size_t)cap, sizeof *h->items) : NULL;
     h->n = 0;
     h->cap = cap;
-}
-
-static int item_before(const top_item *a, const top_item *b)
-{
-    /* true if a is older (smaller) than b — min-heap ordering */
-    if (a->ts != b->ts) return a->ts < b->ts;
-    return a->ns < b->ns;
+    h->before = cmp;
 }
 
 static void heap_sift_down(top_heap *h, int i)
 {
     for (;;) {
         int l = 2 * i + 1, r = 2 * i + 2, small = i;
-        if (l < h->n && item_before(&h->items[l], &h->items[small])) small = l;
-        if (r < h->n && item_before(&h->items[r], &h->items[small])) small = r;
+        if (l < h->n && h->before(&h->items[l], &h->items[small])) small = l;
+        if (r < h->n && h->before(&h->items[r], &h->items[small])) small = r;
         if (small == i) return;
         top_item tmp = h->items[i];
         h->items[i] = h->items[small];
@@ -137,7 +149,7 @@ static void heap_sift_up(top_heap *h, int i)
 {
     while (i > 0) {
         int p = (i - 1) / 2;
-        if (!item_before(&h->items[i], &h->items[p])) return;
+        if (!h->before(&h->items[i], &h->items[p])) return;
         top_item tmp = h->items[i];
         h->items[i] = h->items[p];
         h->items[p] = tmp;
@@ -145,7 +157,7 @@ static void heap_sift_up(top_heap *h, int i)
     }
 }
 
-/* offer path/ts; heap takes ownership of path only if it keeps it */
+/* offer path/ts/size; heap takes ownership of path only if it keeps it */
 static void heap_offer(top_heap *h, const char *path, time_t ts, long ns,
                         uint64_t size)
 {
@@ -159,24 +171,24 @@ static void heap_offer(top_heap *h, const char *path, time_t ts, long ns,
         return;
     }
     top_item cand = { .ts = ts, .ns = ns, .size = size };
-    if (!item_before(&h->items[0], &cand)) return; /* not newer than min */
+    if (!h->before(&h->items[0], &cand)) return; /* not ranked above the min */
     free(h->items[0].path);
     h->items[0] = cand;
     h->items[0].path = strdup(path);
     heap_sift_down(h, 0);
 }
 
-/* sorted newest-first; caller must free() the returned array (not the
+/* sorted best-first; caller must free() the returned array (not the
  * strings inside — those are still owned by the heap) */
 static top_item *heap_sorted(top_heap *h)
 {
     top_item *out = malloc((size_t)h->n * sizeof *out);
     memcpy(out, h->items, (size_t)h->n * sizeof *out);
-    /* simple insertion sort by descending ts,ns — n is small (top-N) */
+    /* simple insertion sort — n is small (top-N) */
     for (int i = 1; i < h->n; i++) {
         top_item key = out[i];
         int j = i - 1;
-        while (j >= 0 && item_before(&out[j], &key)) {
+        while (j >= 0 && h->before(&out[j], &key)) {
             out[j + 1] = out[j];
             j--;
         }
@@ -312,18 +324,119 @@ static int parse_iso8601(const char *s, time_t *sec, long *nsec)
 }
 
 /* ------------------------------------------------------------------ */
+/* extension breakdown — open-addressing hash table, string-keyed       */
+/* ------------------------------------------------------------------ */
+
+/* Distinct extensions are typically in the dozens to low thousands even
+ * across huge trees, so a bounded table sized generously up front with
+ * linear-probe open addressing keeps this O(1) per row and O(1) memory
+ * relative to row count. If a pathological input exceeds the cap (an
+ * extension-per-file adversarial case, or truncated/binary "extensions"
+ * from noisy filenames) further distinct extensions are folded into a
+ * single "(other)" bucket rather than growing unboundedly. */
+#define EXT_TABLE_CAP 65536
+
+typedef struct {
+    char    *ext;      /* malloc'd; NULL = empty slot */
+    uint64_t count;
+    uint64_t bytes;
+} ext_slot;
+
+typedef struct {
+    ext_slot *slots;
+    size_t    cap;
+    size_t    used;     /* distinct extensions stored, excluding overflow */
+    uint64_t  overflow_count;
+    uint64_t  overflow_bytes;
+} ext_table;
+
+static void ext_table_init(ext_table *t)
+{
+    t->cap = EXT_TABLE_CAP;
+    t->slots = calloc(t->cap, sizeof *t->slots);
+    t->used = 0;
+    t->overflow_count = 0;
+    t->overflow_bytes = 0;
+}
+
+static uint64_t ext_hash(const char *s)
+{
+    uint64_t h = 1469598103934665603ULL; /* FNV-1a */
+    for (; *s; s++) {
+        h ^= (unsigned char)*s;
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static void ext_table_add(ext_table *t, const char *ext, uint64_t size)
+{
+    size_t i = (size_t)(ext_hash(ext) % t->cap);
+    for (size_t probe = 0; probe < t->cap; probe++) {
+        ext_slot *s = &t->slots[i];
+        if (s->ext && !strcmp(s->ext, ext)) {
+            s->count++;
+            s->bytes += size;
+            return;
+        }
+        if (!s->ext) {
+            /* only claim a fresh slot while under the load factor that
+             * keeps probing cheap; beyond that, fold into overflow */
+            if (t->used >= t->cap * 3 / 4) break;
+            s->ext = strdup(ext);
+            s->count = 1;
+            s->bytes = size;
+            t->used++;
+            return;
+        }
+        i = (i + 1) % t->cap;
+    }
+    t->overflow_count++;
+    t->overflow_bytes += size;
+}
+
+/* extension of `path` (without the dot), lowercased into `out`; "" for
+ * no extension (dotfiles with nothing after the dot, or no dot at all) */
+static const char *file_extension(const char *path, char *out, size_t outsz)
+{
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    const char *dot = strrchr(base, '.');
+    /* a leading dot with nothing before it (".bashrc") is a hidden file,
+     * not an extension */
+    if (!dot || dot == base) return "";
+    dot++;
+    if (!*dot) return "";
+    size_t i = 0;
+    for (; dot[i] && i + 1 < outsz; i++)
+        out[i] = (char)tolower((unsigned char)dot[i]);
+    out[i] = '\0';
+    return out;
+}
+
+/* qsort comparator: descending by bytes */
+static int ext_slot_cmp(const void *pa, const void *pb)
+{
+    const ext_slot *a = *(const ext_slot **)pa, *b = *(const ext_slot **)pb;
+    if (a->bytes != b->bytes) return a->bytes > b->bytes ? -1 : 1;
+    if (a->count != b->count) return a->count > b->count ? -1 : 1;
+    return strcmp(a->ext, b->ext);
+}
+
+/* ------------------------------------------------------------------ */
 /* configuration                                                        */
 /* ------------------------------------------------------------------ */
 
 static struct {
-    int          topn;
+    int          topn;      /* recent-access/modified and largest-files lists */
+    int          topext;    /* extensions shown in the breakdown */
     const char  *inpath;   /* NULL => stdin */
     const char  *outpath;  /* NULL => stdout */
     const char  *csv_out;  /* histogram CSV dump, or NULL */
     time_t       now;
     bool         now_set;
     bool         quiet;
-} g = { .topn = 20 };
+} g = { .topn = 20, .topext = 20 };
 
 static void usage(FILE *to)
 {
@@ -332,17 +445,20 @@ static void usage(FILE *to)
 "\n"
 "Reads a CSV catalogue produced by `p3m-ls -m full` (atime/mtime require\n"
 "full mode; standard mode works for mtime-only stats) and reports access\n"
-"and modification age statistics: the most recently accessed and most\n"
-"recently modified files, and how much data falls into each\n"
-"'not touched in over X' age bucket, by file count and by bytes.\n"
+"and modification age statistics: the most recently accessed, most\n"
+"recently modified and largest files; how much data falls into each\n"
+"'not touched in over X' age bucket, by file count and by bytes; and a\n"
+"breakdown of file count/bytes by extension.\n"
 "\n"
 "With no FILE, reads from stdin. The CSV header is used to locate the\n"
 "path/size/atime/mtime columns, so column order does not matter and\n"
 "extra columns are ignored.\n"
 "\n"
 "Options:\n"
-"  -n, --top N            show the N most recent files per list\n"
+"  -n, --top N            show the N most recent/largest files per list\n"
 "                         (default: 20; 0 disables the top lists)\n"
+"  -e, --top-ext N        show the N largest extensions in the breakdown\n"
+"                         (default: 20; 0 disables the breakdown)\n"
 "  -o, --output FILE      write the report to FILE instead of stdout\n"
 "      --csv-summary FILE also write the age histogram as CSV to FILE\n"
 "      --now TIMESTAMP    treat TIMESTAMP (ISO 8601 UTC, e.g.\n"
@@ -367,6 +483,7 @@ enum { OPT_CSV_SUMMARY = 1000, OPT_NOW };
 
 static const struct option lopts[] = {
     { "top",         required_argument, NULL, 'n' },
+    { "top-ext",     required_argument, NULL, 'e' },
     { "output",      required_argument, NULL, 'o' },
     { "csv-summary", required_argument, NULL, OPT_CSV_SUMMARY },
     { "now",         required_argument, NULL, OPT_NOW },
@@ -458,6 +575,72 @@ static void print_top(FILE *out, const char *title, top_heap *h)
     free(sorted);
 }
 
+static void print_largest(FILE *out, const char *title, top_heap *h)
+{
+    if (h->cap == 0) return;
+    fprintf(out, "\n%s%s%s\n", C_BOLD, title, C_RESET);
+    if (h->n == 0) {
+        fprintf(out, "  (no data)\n");
+        return;
+    }
+    top_item *sorted = heap_sorted(h);
+    for (int i = 0; i < h->n; i++) {
+        char szbuf[32];
+        fprintf(out, "  %10s  %s\n",
+                p3m_fmt_size(sorted[i].size, szbuf), sorted[i].path);
+    }
+    free(sorted);
+}
+
+static void print_extensions(FILE *out, ext_table *t, int topn,
+                              uint64_t total_files, uint64_t total_bytes)
+{
+    if (topn == 0) return;
+    fprintf(out, "\n%s%s%s\n", C_BOLD, "Breakdown by extension", C_RESET);
+
+    ext_slot **rows = malloc(t->used * sizeof *rows);
+    size_t nrows = 0;
+    for (size_t i = 0; i < t->cap; i++)
+        if (t->slots[i].ext) rows[nrows++] = &t->slots[i];
+    qsort(rows, nrows, sizeof *rows, ext_slot_cmp);
+
+    uint64_t max_bytes = 0;
+    for (size_t i = 0; i < nrows && (int)i < topn; i++)
+        if (rows[i]->bytes > max_bytes) max_bytes = rows[i]->bytes;
+
+    fprintf(out, "  %-16s %10s %12s %8s  %s\n",
+            "extension", "files", "bytes", "% bytes", "");
+    char nb[32], sb[32];
+    size_t shown = (size_t)topn < nrows ? (size_t)topn : nrows;
+    for (size_t i = 0; i < shown; i++) {
+        const char *name = rows[i]->ext[0] ? rows[i]->ext : "(none)";
+        double pct = total_bytes ? 100.0 * (double)rows[i]->bytes / (double)total_bytes : 0.0;
+        fprintf(out, "  %-16s %10s %12s %7.2f%%  ", name,
+                p3m_fmt_u64(rows[i]->count, nb),
+                p3m_fmt_size(rows[i]->bytes, sb), pct);
+        print_bar(out, rows[i]->bytes, max_bytes, 24);
+        fputc('\n', out);
+    }
+    if (nrows > shown) {
+        uint64_t rest_count = 0, rest_bytes = 0;
+        for (size_t i = shown; i < nrows; i++) {
+            rest_count += rows[i]->count;
+            rest_bytes += rows[i]->bytes;
+        }
+        fprintf(out, "  %s%-16s %10s %12s  (%zu more distinct extensions)%s\n",
+                C_DIM, "(other)", p3m_fmt_u64(rest_count, nb),
+                p3m_fmt_size(rest_bytes, sb), nrows - shown, C_RESET);
+    }
+    if (t->overflow_count) {
+        fprintf(out, "  %s%-16s %10s %12s  (extension table at capacity)%s\n",
+                C_DIM, "(overflow)", p3m_fmt_u64(t->overflow_count, nb),
+                p3m_fmt_size(t->overflow_bytes, sb), C_RESET);
+    }
+    fprintf(out, "  %-16s %10s %12s\n", "total",
+            p3m_fmt_u64(total_files, nb), p3m_fmt_size(total_bytes, sb));
+    free(rows);
+}
+
 static void dump_csv_summary(const char *path, const age_hist *ah,
                               const age_hist *mh)
 {
@@ -483,7 +666,7 @@ int main(int argc, char **argv)
     p3m_color = isatty(STDOUT_FILENO);
 
     int c;
-    while ((c = getopt_long(argc, argv, "n:o:qhV", lopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "n:e:o:qhV", lopts, NULL)) != -1) {
         switch (c) {
         case 'n': {
             char *end;
@@ -493,6 +676,16 @@ int main(int argc, char **argv)
                 return 2;
             }
             g.topn = (int)v;
+            break;
+        }
+        case 'e': {
+            char *end;
+            long v = strtol(optarg, &end, 10);
+            if (*end || v < 0 || v > 100000) {
+                fprintf(stderr, "p3m-stats: --top-ext: invalid value '%s'\n", optarg);
+                return 2;
+            }
+            g.topext = (int)v;
             break;
         }
         case 'o': g.outpath = optarg; break;
@@ -580,9 +773,13 @@ int main(int argc, char **argv)
     ahist.oldest_age = ahist.newest_age = -1;
     mhist.oldest_age = mhist.newest_age = -1;
 
-    top_heap atop, mtop;
-    heap_init(&atop, col_atime >= 0 ? g.topn : 0);
-    heap_init(&mtop, col_mtime >= 0 ? g.topn : 0);
+    top_heap atop, mtop, sizetop;
+    heap_init(&atop, col_atime >= 0 ? g.topn : 0, cmp_by_time);
+    heap_init(&mtop, col_mtime >= 0 ? g.topn : 0, cmp_by_time);
+    heap_init(&sizetop, col_size >= 0 ? g.topn : 0, cmp_by_size);
+
+    ext_table etab = {0};
+    if (g.topext > 0) ext_table_init(&etab);
 
     uint64_t total_files = 0, total_bytes = 0;
     uint64_t n_malformed = 0;
@@ -604,6 +801,15 @@ int main(int argc, char **argv)
 
         total_files++;
         total_bytes += size;
+
+        if (col_size >= 0)
+            heap_offer(&sizetop, fields[col_path].buf, 0, 0, size);
+
+        if (g.topext > 0) {
+            char extbuf[64];
+            const char *ext = file_extension(fields[col_path].buf, extbuf, sizeof extbuf);
+            ext_table_add(&etab, ext, size);
+        }
 
         if (col_atime >= 0 && fields[col_atime].len) {
             time_t sec; long ns;
@@ -652,6 +858,8 @@ int main(int argc, char **argv)
                 print_top(out, "Most recently accessed (atime)", &atop);
             if (col_mtime >= 0)
                 print_top(out, "Most recently modified (mtime)", &mtop);
+            if (col_size >= 0)
+                print_largest(out, "Largest files", &sizetop);
         }
         if (col_atime >= 0)
             print_hist(out, "Access age (atime) — data not read in over X",
@@ -659,6 +867,8 @@ int main(int argc, char **argv)
         if (col_mtime >= 0)
             print_hist(out, "Modification age (mtime) — data not written in over X",
                        &mhist, total_files, total_bytes);
+        if (g.topext > 0)
+            print_extensions(out, &etab, g.topext, total_files, total_bytes);
         fputc('\n', out);
     }
 
