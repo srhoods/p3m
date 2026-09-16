@@ -39,7 +39,8 @@ external library dependencies.
 
 ## Documentation
 
-Per-tool user documentation lives in [`docs/`](docs/).
+Per-tool user documentation lives in [`docs/`](docs/). See
+[CHANGELOG.md](CHANGELOG.md) for a history of what changed and when.
 
 ## Testing
 
