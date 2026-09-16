@@ -51,6 +51,23 @@ void p3m_print_errors(void);                       /* report on stderr */
 void p3m_set_current(const char *p);
 void p3m_get_current(char *dst, size_t n);
 
+/* ---- graceful SIGINT/SIGTERM stop ------------------------------------ */
+/*
+ * For tools where killing worker threads mid-syscall could leave a
+ * destination half-written (p3m-cp, p3m-mv): install with
+ * p3m_install_stop_handler() before starting workers. The first
+ * SIGINT/SIGTERM sets a flag (checked by p3m_stack_pop, which then
+ * returns NULL as if the walk had finished) and prints one notice —
+ * workers finish whatever transfer they are already in the middle of,
+ * then drain out naturally with no more work to pop. A second signal
+ * restores the default disposition and re-raises it, for a caller that
+ * wants to force an immediate exit. p3m_stop_signal() reports which
+ * signal (if any) triggered the stop, for exit-code purposes.
+ */
+void p3m_install_stop_handler(void);
+bool p3m_stop_requested(void);
+int  p3m_stop_signal(void);                        /* 0 if none received */
+
 /* ---- parallel work stack of directory paths ------------------------- */
 
 typedef struct {

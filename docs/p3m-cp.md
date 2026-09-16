@@ -136,7 +136,37 @@ Per-entry: an unreadable file or failed create is recorded in the CSV
 `result`, counted, and summarised on stderr; the run continues. Skipped
 existing destinations are **not** errors (exit 0). Exit status: `0`
 success · `1` completed with errors · `2` usage error, invalid target,
-or into-itself refusal.
+or into-itself refusal · `130`/`143` interrupted by SIGINT/SIGTERM (see
+below).
+
+## Interrupting a copy (SIGINT / SIGTERM)
+
+`--apply` copies are safe to interrupt with Ctrl-C (SIGINT) or a plain
+`kill` (SIGTERM): the first signal is acknowledged immediately —
+
+```
+p3m: signal received, finishing in-flight transfers... (press again to force)
+```
+
+— and each worker thread finishes the file it is currently copying
+(never truncating a destination mid-write) before stopping; any
+directories not yet reached are simply left uncopied. Directories that
+*were* fully populated still get their final metadata fix-up pass
+(mode/ownership/timestamps with `-p`), so a stopped run leaves a
+consistent, if partial, destination tree — safe to inspect, or to
+finish later with another `p3m-cp` / `--overwrite` run. The summary
+prints with `⚠ interrupted` instead of `✓ complete`, and the process
+exits `130` (SIGINT) or `143` (SIGTERM) instead of `0`/`1`, so scripts
+can tell an intentional stop apart from a completed run or a copy
+error.
+
+A **second** signal abandons the graceful path and terminates
+immediately, same as an unhandled signal would — use it if a single
+in-flight file is inconveniently large and you want out right away; the
+file it was writing will be left truncated.
+
+This only applies to `--apply`; a dry run does no filesystem writes, so
+there is nothing to protect and an interrupt behaves normally.
 
 ## Examples
 

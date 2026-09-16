@@ -277,6 +277,51 @@ void p3m_get_current(char *dst, size_t n)
 }
 
 /* ------------------------------------------------------------------ */
+/* graceful SIGINT/SIGTERM stop                                         */
+/* ------------------------------------------------------------------ */
+
+static _Atomic bool stop_requested;
+static _Atomic int  stop_signum;
+static bool stop_handler_installed; /* progress display defers to it */
+
+static void stop_signal(int sig)
+{
+    bool already = atomic_exchange(&stop_requested, true);
+    if (already) {
+        /* second signal: give up on the graceful path, die immediately.
+         * Restore the cursor first in case a progress display is live. */
+        ssize_t r = write(STDERR_FILENO, "\x1b[?25h\n", 7);
+        (void)r;
+        signal(sig, SIG_DFL);
+        raise(sig);
+        return;
+    }
+    atomic_store(&stop_signum, sig);
+    static const char msg[] =
+        "\np3m: signal received, finishing in-flight transfers... "
+        "(press again to force)\n";
+    ssize_t r = write(STDERR_FILENO, msg, sizeof msg - 1);
+    (void)r;
+}
+
+void p3m_install_stop_handler(void)
+{
+    stop_handler_installed = true;
+    signal(SIGINT, stop_signal);
+    signal(SIGTERM, stop_signal);
+}
+
+bool p3m_stop_requested(void)
+{
+    return atomic_load(&stop_requested);
+}
+
+int p3m_stop_signal(void)
+{
+    return atomic_load(&stop_signum);
+}
+
+/* ------------------------------------------------------------------ */
 /* work stack                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -328,19 +373,35 @@ void p3m_stack_push_batch(p3m_stack *s, char **paths, size_t n)
 
 char *p3m_stack_pop(p3m_stack *s)
 {
+    if (atomic_load_explicit(&stop_requested, memory_order_relaxed))
+        return NULL;
     pthread_mutex_lock(&s->mu);
     while (s->len == 0 && !s->done) {
+        if (atomic_load_explicit(&stop_requested, memory_order_relaxed)) {
+            pthread_mutex_unlock(&s->mu);
+            return NULL;
+        }
         s->idle++;
         if (s->idle >= s->nthreads) {
             s->done = true;
             pthread_cond_broadcast(&s->cv);
         } else {
-            pthread_cond_wait(&s->cv, &s->mu);
+            /* bounded wait so an idle thread notices a stop request
+             * promptly even with no new work arriving to broadcast on */
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_nsec += 200 * 1000 * 1000;
+            if (ts.tv_nsec >= 1000000000L) {
+                ts.tv_sec++;
+                ts.tv_nsec -= 1000000000L;
+            }
+            pthread_cond_timedwait(&s->cv, &s->mu, &ts);
         }
         s->idle--;
     }
     char *p = NULL;
-    if (s->len > 0)
+    if (s->len > 0 &&
+        !atomic_load_explicit(&stop_requested, memory_order_relaxed))
         p = s->items[--s->len];
     pthread_mutex_unlock(&s->mu);
     return p;
@@ -611,8 +672,13 @@ int p3m_progress_start(const p3m_progress_cfg *cfg)
 {
     prog.cfg = *cfg;
     atomic_store(&prog.running, true);
-    signal(SIGINT, prog_signal);
-    signal(SIGTERM, prog_signal);
+    /* tools with a graceful stop handler (p3m_install_stop_handler) own
+     * SIGINT/SIGTERM themselves; prog_signal's die-immediately behaviour
+     * would defeat that, so only install it when nothing else has */
+    if (!stop_handler_installed) {
+        signal(SIGINT, prog_signal);
+        signal(SIGTERM, prog_signal);
+    }
     if (pthread_create(&prog.tid, NULL, prog_fn, NULL) != 0)
         return -1;
     prog.active = true;

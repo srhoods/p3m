@@ -148,7 +148,38 @@ directories kept because they still hold skipped entries are counted.
 Per-entry: recorded in the CSV `result` column, counted, and
 summarised on stderr; the run continues. Skips are not errors. Exit
 status: `0` success · `1` completed with errors · `2` usage error,
-root-guard or into-itself refusal.
+root-guard or into-itself refusal · `130`/`143` interrupted by
+SIGINT/SIGTERM (see below).
+
+## Interrupting a move (SIGINT / SIGTERM)
+
+`--apply` moves are safe to interrupt with Ctrl-C (SIGINT) or a plain
+`kill` (SIGTERM): the first signal is acknowledged immediately —
+
+```
+p3m: signal received, finishing in-flight transfers... (press again to force)
+```
+
+— and each worker thread finishes whatever it is currently doing
+before stopping: a single-rename is atomic and instant regardless, and
+a cross-device copy+delete always finishes the copy (and only then
+removes the source) before checking for a stop, so a source file is
+never deleted without its destination being fully written, and a
+destination is never left truncated. Any entries not yet reached are
+left where they are — sources kept, nothing partially moved. The
+summary prints with `⚠ interrupted` instead of `✓ complete`, and the
+process exits `130` (SIGINT) or `143` (SIGTERM) instead of `0`/`1`, so
+scripts can tell an intentional stop apart from a completed run or a
+move error.
+
+A **second** signal abandons the graceful path and terminates
+immediately, same as an unhandled signal would — use it if a single
+in-flight cross-device copy is inconveniently large and you want out
+right away; that one file's destination will be left truncated (its
+source, not yet deleted, is unaffected).
+
+This only applies to `--apply`; a dry run does no filesystem writes, so
+there is nothing to protect and an interrupt behaves normally.
 
 ## Examples
 

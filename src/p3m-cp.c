@@ -24,7 +24,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_CP_VERSION "1.0.0"
+#define P3M_CP_VERSION "1.1.0"
 
 static struct {
     bool         apply;
@@ -639,7 +639,7 @@ static void prog_draw(double rate, int frame)
 /* summary                                                              */
 /* ------------------------------------------------------------------ */
 
-static void print_summary(double elapsed)
+static void print_summary(double elapsed, bool interrupted)
 {
     uint64_t files = atomic_load(&n_files);
     uint64_t dirs  = atomic_load(&n_dirs);
@@ -659,9 +659,10 @@ static void print_summary(double elapsed)
     p3m_fmt_elapsed(elapsed, el);
 
     fprintf(stderr,
-            "%s✓%s %sp3m-cp%s complete — %s · %s files · %s dirs · "
+            "%s%s%s %sp3m-cp%s %s — %s · %s files · %s dirs · "
             "%s %s · %s%s skipped%s · %s%s error%s%s\n",
-            C_GREEN, C_RESET, C_BOLD, C_RESET,
+            interrupted ? C_RED : C_GREEN, interrupted ? "⚠" : "✓", C_RESET,
+            C_BOLD, C_RESET, interrupted ? "interrupted" : "complete",
             g.apply ? "apply" : "dry-run", fv, dv,
             sv, g.apply ? "copied" : "to copy",
             skip ? C_BOLD : "", kv, skip ? C_RESET : "",
@@ -711,7 +712,10 @@ static void usage(FILE *to)
 "  -V, --version       show version and exit\n"
 "\n"
 "Symbolic links are never followed: they are recreated as links.\n"
-"Copying a directory into itself is refused.\n",
+"Copying a directory into itself is refused.\n"
+"\n"
+"SIGINT/SIGTERM during --apply finish in-flight file copies before\n"
+"stopping (exit 130/143); a second signal forces an immediate exit.\n",
     to);
 }
 
@@ -896,6 +900,10 @@ int main(int argc, char **argv)
     if (!g.suppress)
         fputs("source,type,size,destination,result\n", out);
 
+    /* graceful stop: SIGINT/SIGTERM finish in-flight file copies rather
+     * than killing threads mid-write and leaving a torn destination */
+    p3m_install_stop_handler();
+
     if (g.progress)
         p3m_set_current("…");
     t_start = p3m_mono_now();
@@ -1019,10 +1027,16 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    print_summary(elapsed);
+    int stopsig = p3m_stop_signal();
+    print_summary(elapsed, stopsig != 0);
+    if (stopsig)
+        fprintf(stderr, "  %sremaining work was abandoned%s\n", C_DIM, C_RESET);
     p3m_print_errors();
+
     p3m_stack_destroy(&stk);
     free(dest);
 
+    if (stopsig)
+        return 128 + stopsig;
     return atomic_load(&p3m_nerrors) ? 1 : 0;
 }

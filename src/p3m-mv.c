@@ -30,7 +30,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_MV_VERSION "1.0.0"
+#define P3M_MV_VERSION "1.1.0"
 
 /*
  * Walk context, carried in each work item:
@@ -819,7 +819,7 @@ static void prog_draw(double rate, int frame)
 /* summary                                                              */
 /* ------------------------------------------------------------------ */
 
-static void print_summary(double elapsed)
+static void print_summary(double elapsed, bool interrupted)
 {
     uint64_t files = atomic_load(&n_files);
     uint64_t dirs  = atomic_load(&n_dirs);
@@ -841,9 +841,10 @@ static void print_summary(double elapsed)
     p3m_fmt_elapsed(elapsed, el);
 
     fprintf(stderr,
-            "%s✓%s %sp3m-mv%s complete — %s · %s files · %s dirs · "
+            "%s%s%s %sp3m-mv%s %s — %s · %s files · %s dirs · "
             "%s rename%s · %s copied · %s%s skipped%s · %s%s error%s%s\n",
-            C_GREEN, C_RESET, C_BOLD, C_RESET,
+            interrupted ? C_RED : C_GREEN, interrupted ? "⚠" : "✓", C_RESET,
+            C_BOLD, C_RESET, interrupted ? "interrupted" : "complete",
             g.apply ? "apply" : "dry-run", fv, dv,
             nv, ren == 1 ? "" : "s", sv,
             skip ? C_BOLD : "", kv, skip ? C_RESET : "",
@@ -896,7 +897,11 @@ static void usage(FILE *to)
 "  -V, --version       show version and exit\n"
 "\n"
 "The filesystem root can never be a source — this guard cannot be\n"
-"overridden. Symbolic links are moved as links, never followed.\n",
+"overridden. Symbolic links are moved as links, never followed.\n"
+"\n"
+"SIGINT/SIGTERM during --apply finish an in-flight rename or copy\n"
+"before stopping (exit 130/143); a second signal forces an immediate\n"
+"exit.\n",
     to);
 }
 
@@ -1090,6 +1095,12 @@ int main(int argc, char **argv)
     if (!g.suppress)
         fputs("source,type,size,destination,result\n", out);
 
+    /* graceful stop: SIGINT/SIGTERM finish an in-flight rename or
+     * cross-device copy rather than killing threads mid-transfer and
+     * leaving a torn destination (or, worse, a deleted-but-not-copied
+     * source in the copy+delete path) */
+    p3m_install_stop_handler();
+
     if (g.progress)
         p3m_set_current("…");
     t_start = p3m_mono_now();
@@ -1232,10 +1243,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    print_summary(elapsed);
+    int stopsig = p3m_stop_signal();
+    print_summary(elapsed, stopsig != 0);
+    if (stopsig)
+        fprintf(stderr, "  %sremaining work was abandoned%s\n", C_DIM, C_RESET);
     p3m_print_errors();
     p3m_stack_destroy(&stk);
     free(dest);
 
+    if (stopsig)
+        return 128 + stopsig;
     return atomic_load(&p3m_nerrors) ? 1 : 0;
 }
