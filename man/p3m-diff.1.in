@@ -1,0 +1,97 @@
+.TH P3M-DIFF 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-diff \- parallel directory comparison
+.SH SYNOPSIS
+.B p3m-diff
+.RI [ OPTIONS ]
+.I LEFT
+.I RIGHT
+.SH DESCRIPTION
+.B p3m-diff
+compares two directory trees in lockstep with a pool of worker threads and
+reports the likelihood that their contents are the same.
+By default entry names, types, sizes and metadata (mode, owner, group and
+mtime at nanosecond precision) are compared.
+Every difference is streamed as CSV and summarised at the end with a
+plain-language verdict.
+.PP
+With
+.B \-c
+file contents are compared too.
+The comparison is byte-exact rather than checksum-based: both files are read
+in 1\ MiB chunks and compared directly, stopping at (and reporting) the first
+differing byte.
+A file's size is checked first and the content read is skipped when the sizes
+already differ.
+.PP
+Symbolic links are never followed; they are compared by target, owner and
+group and never descended into.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-checksum
+Also compare file contents, byte for byte.
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Worker threads (default: the number of online CPUs).
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the CSV listing to
+.I FILE
+and show a live progress display.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the console listing; progress and the summary verdict are still
+shown.
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH OUTPUT
+CSV columns:
+.IR path ,
+.IR difference ,
+.IR left ,
+.IR right .
+.I path
+is relative to the roots;
+.I difference
+is one of
+.BR only\-left ,
+.BR only\-right ,
+.BR type ,
+.BR size ,
+.BR content ,
+.BR mode ,
+.BR owner ,
+.BR group ,
+.BR mtime ,
+.BR target ,
+.BR device .
+.PP
+The verdict is one of: very likely identical (default mode), identical
+verified byte-for-byte
+.RB ( \-c ),
+trees differ, or withheld when errors made coverage incomplete.
+.SH EXIT STATUS
+.TP
+.B 0
+No differences.
+.TP
+.B 1
+Differences found.
+.TP
+.B 2
+Usage error, or comparison errors (verdict withheld).
+.SH EXAMPLES
+.nf
+p3m\-diff /data/primary /data/replica
+p3m\-diff \-c \-j 16 /srv/site /backup/site
+p3m\-diff \-q \-o differences.csv /a /b
+.fi
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-cp (1),
+.BR diff (1),
+.BR rsync (1)

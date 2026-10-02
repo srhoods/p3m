@@ -30,8 +30,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_MV_VERSION "1.1.0"
-
 /*
  * Walk context, carried in each work item:
  *   CTX_RENAME  same-parent-fs unknown: try rename first, check dest
@@ -980,8 +978,7 @@ int main(int argc, char **argv)
             usage(stdout);
             return 0;
         case 'V':
-            printf("p3m-mv %s (p3m: Parallel POSIX Permission Manager)\n",
-                   P3M_MV_VERSION);
+            p3m_print_version("p3m-mv");
             return 0;
         default:
             usage(stderr);

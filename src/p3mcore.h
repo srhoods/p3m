@@ -17,6 +17,18 @@
 #include <sys/types.h>
 #include <time.h>
 
+/* ---- release version -------------------------------------------------- */
+/*
+ * The suite is versioned as a whole. The Makefile injects the contents of
+ * the top-level VERSION file as -DP3M_VERSION="x.y.z"; CHANGELOG.md release
+ * headings and the RPM spec are checked against it by `make check-version`.
+ */
+#ifndef P3M_VERSION
+#define P3M_VERSION "unknown"
+#endif
+
+void p3m_print_version(const char *tool);          /* "p3m-ls 1.0.0 (...)" */
+
 /* ---- colours (tools set p3m_color once at startup) ------------------ */
 
 extern bool p3m_color;

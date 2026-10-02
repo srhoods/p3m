@@ -1,0 +1,143 @@
+.TH P3M-FIND 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-find \- parallel find
+.SH SYNOPSIS
+.B p3m-find
+.RI [ P3M\-OPTIONS ]
+.RI [ PATH ...]
+.RI [ EXPRESSION ]
+.SH DESCRIPTION
+.B p3m-find
+searches directory trees in parallel with a
+.BR find (1)-style
+expression.
+With no
+.IR PATH ,
+the current directory is searched; with no
+.IR EXPRESSION ,
+everything matches.
+Matches are printed as CSV (a
+.I path
+header and one row per match) or NUL-separated with
+.BR \-print0 .
+.PP
+The classic grammar (including implicit
+.BR \-a ,
+short-circuit evaluation and find's interval semantics for time tests) is
+supported.
+.BR stat (2)
+is lazy: tests that need it trigger it once per entry, so name-only searches
+issue no
+.B stat
+calls.
+.PP
+.B p3m-find
+is read-only by design: there is deliberately no
+.B \-delete
+or
+.BR \-exec .
+Pipe matches to
+.BR "xargs \-0" ,
+or feed them to
+.BR p3m\-rm (1)
+or
+.BR p3m\-ch (1).
+Symbolic links are never followed.
+.SH P3M OPTIONS
+These must appear before any
+.IR PATH .
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Worker threads (default: the number of online CPUs).
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write matches to
+.I FILE
+and show a live progress display.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the listing; progress and the summary (with the match count) are
+still shown.
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH TESTS
+.TP
+.BR \-name " \fIP\fR, " \-iname " \fIP\fR"
+Glob on the entry name (\fBi\fR: case-insensitive).
+.TP
+.BR \-path " \fIP\fR, " \-ipath " \fIP\fR"
+Glob on the full path.
+.TP
+.BR \-regex " \fIP\fR, " \-iregex " \fIP\fR"
+POSIX extended regular expression, anchored to the whole path.
+.TP
+.BI \-type " T" [, T ...]
+One or more of
+.BR f " (file), " d " (directory), " l " (symlink), " b ", " c ", " p ", " s .
+Combinable, for example
+.BR "\-type f,l" .
+.TP
+.BR \-size " [+\-]\fIN\fR[bckMG]"
+Size rounded up to the unit, as with
+.BR find (1)
+(default
+.BR b ).
+.TP
+.BR \-mtime ", " \-atime ", " \-ctime " [+\-]\fIN\fR"
+Age in 24-hour units.
+.TP
+.BR \-mmin ", " \-amin ", " \-cmin " [+\-]\fIN\fR"
+Age in minutes.
+.TP
+.BI \-newer " FILE"
+Modified more recently than
+.IR FILE .
+.TP
+.BI \-user " U" ", " \-group " G"
+Owner or group, by name or numeric id.
+.TP
+.BR \-perm " [\-|/]\fIOCTAL\fR"
+Exact mode, all of the bits (\fB\-\fR prefix), or any of the bits (\fB/\fR
+prefix).
+.TP
+.B \-empty
+Empty regular file or directory.
+.TP
+.BI \-mindepth " N" ", " \-maxdepth " N"
+Depth limits; the
+.I PATH
+itself is depth 0.
+.TP
+.B \-print0
+NUL-separated output for
+.BR "xargs \-0" .
+.SH OPERATORS
+In decreasing order of precedence:
+.TP
+.BI ( " EXPR " )
+Grouping.
+.TP
+.BI ! " EXPR" ", " \-not " EXPR"
+Negation.
+.TP
+.IB EXPR " " EXPR ", " EXPR " \-a " EXPR
+Conjunction (the default between adjacent expressions).
+.TP
+.IB EXPR " \-o " EXPR
+Disjunction.
+.SH EXAMPLES
+.nf
+p3m\-find /var/log \-name '*.log' \-mtime +30
+p3m\-find /data \-type f \-size +1G
+p3m\-find \-\-print0 /scratch \-name 'tmp\-*' | xargs \-0 \-r du \-ch
+p3m\-find \-q /data \-type f \-newer /data/.last\-backup
+.fi
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-ls (1),
+.BR p3m\-rm (1),
+.BR find (1)

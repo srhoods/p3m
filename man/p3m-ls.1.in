@@ -1,0 +1,161 @@
+.TH P3M-LS 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-ls \- parallel recursive directory lister
+.SH SYNOPSIS
+.B p3m-ls
+.RI [ OPTIONS ]
+.RI [ PATH ...]
+.SH DESCRIPTION
+.B p3m-ls
+walks one or more directory trees with a pool of worker threads and emits
+every entry found as CSV.
+It is a high-performance alternative to
+.BR "ls \-R" " and " find (1)
+for cataloguing large trees, and is fastest on directories with very many
+entries and on storage where each metadata operation has latency (NFS, CIFS,
+cluster file systems).
+.PP
+With no
+.IR PATH ,
+the current directory is scanned.
+Multiple paths are scanned concurrently as part of the same run.
+The root paths themselves are not emitted, only their contents.
+.PP
+Output row order is non-deterministic because directories are processed in
+parallel; pipe through
+.BR sort (1)
+if a stable order is required.
+Symbolic links are reported but never followed.
+.SH OPTIONS
+.TP
+.BR \-m ", " \-\-mode " \fILEVEL\fR"
+Detail level:
+.BR basic " (default), " standard " or " full .
+Single-letter abbreviations are accepted.
+See
+.BR "DETAIL LEVELS" .
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Number of worker threads, 1\(en512.
+Default: the number of online CPUs.
+.TP
+.BR \-t ", " \-\-type " \fITYPES\fR"
+Only output entries of the given types.
+Types combine freely, for example
+.BR "\-t fl" .
+See
+.BR "TYPE CHARACTERS" .
+.TP
+.B \-\-no\-dirs
+Omit directories from the output.
+The walk still descends into them.
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the CSV to
+.I FILE
+instead of standard output, and show a live progress display on the terminal.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the console listing.
+Progress (on a terminal) and the end-of-run summary are still shown, and a
+.B \-o
+file is still written in full.
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH DETAIL LEVELS
+.TP
+.B basic
+One column,
+.IR path .
+Entries are classified from the directory stream and normally no
+.BR stat (2)
+calls are issued at all.
+.TP
+.B standard
+.nf
+path,type,size,mode,owner,group,mtime
+.fi
+.TP
+.B full
+Every field
+.BR stat (2)
+provides:
+.nf
+path,type,mode,perms,nlink,owner,uid,group,gid,size,
+blksize,blocks,dev,ino,rdev,atime,mtime,ctime
+.fi
+.IP
+.IR atime ,
+.I mtime
+and
+.I ctime
+are ISO\ 8601 UTC with nanosecond precision.
+This is the input format expected by
+.BR p3m\-stats (1).
+.SH TYPE CHARACTERS
+.TS
+l l.
+f	regular file
+d	directory
+l	symbolic link
+b	block device
+c	character device
+p	FIFO (named pipe)
+s	socket
+.TE
+.PP
+.B \-t
+values may be concatenated, are case-insensitive, and may use an optional
+comma separator.
+.SH CSV FORMAT
+The first line is always a header row.
+Fields containing commas, double quotes or newlines are quoted per RFC\ 4180,
+so the output loads directly into spreadsheets,
+.BR sqlite3 (1)
+.BR .import ,
+pandas, and similar tools.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Completed, but errors were encountered (or the output could not be fully written).
+.TP
+.B 2
+Usage or startup error.
+.SH EXAMPLES
+Fast inventory of a tree, one path per line:
+.PP
+.RS
+.nf
+p3m\-ls /data
+.fi
+.RE
+.PP
+Full metadata catalogue written to a file, with live progress:
+.PP
+.RS
+.nf
+p3m\-ls \-m full \-o catalogue.csv /data
+.fi
+.RE
+.PP
+Only symlinks and regular files, 16 threads (high-latency NFS):
+.PP
+.RS
+.nf
+p3m\-ls \-j 16 \-t fl \-\-no\-dirs \-m standard /mnt/nfs/share
+.fi
+.RE
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-stats (1),
+.BR p3m\-find (1),
+.BR p3m\-du (1),
+.BR find (1),
+.BR ls (1)

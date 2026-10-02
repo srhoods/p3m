@@ -1,0 +1,43 @@
+Name:           p3m
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Parallel POSIX file system tools (ls, chmod/chown, rm, du, cp, mv, find, diff, stats)
+License:        MIT
+URL:            https://github.com/srhoods/p3m
+Source0:        %{name}-%{version}.tar.gz
+
+BuildRequires:  gcc
+BuildRequires:  make
+
+%description
+p3m is a set of high-performance command line tools that parallelise
+traditionally single-threaded file system operations across large
+directory trees using a pool of worker threads: p3m-ls (recursive listing
+to CSV), p3m-ch (chmod/chown/chgrp in one scan), p3m-rm, p3m-du, p3m-cp,
+p3m-mv, p3m-find, p3m-diff (directory comparison) and p3m-stats (age and
+hot/cold statistics from a p3m-ls catalogue).
+
+Tools that modify the file system are dry-run by default and take --apply.
+
+%prep
+%autosetup
+
+%build
+%make_build CFLAGS="%{optflags}" LDFLAGS="%{?__global_ldflags}"
+
+%install
+%make_install PREFIX=%{_prefix}
+
+%check
+for t in ls ch rm du cp mv find diff stats; do
+    ./bin/p3m-$t --version | grep -q '^p3m-'"$t"' %{version} '
+done
+
+%files
+%license LICENSE.md
+%doc %{_docdir}/p3m
+%{_bindir}/p3m-*
+%{_mandir}/man1/p3m-*.1*
+%{_mandir}/man7/p3m.7*
+
+%changelog

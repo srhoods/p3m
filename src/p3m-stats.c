@@ -34,8 +34,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#define P3M_STATS_VERSION "1.1.0"
-
 /* ------------------------------------------------------------------ */
 /* age buckets                                                          */
 /* ------------------------------------------------------------------ */
@@ -702,7 +700,7 @@ int main(int argc, char **argv)
         }
         case 'q': g.quiet = true; break;
         case 'h': usage(stdout); return 0;
-        case 'V': printf("p3m-stats %s\n", P3M_STATS_VERSION); return 0;
+        case 'V': p3m_print_version("p3m-stats"); return 0;
         default: usage(stderr); return 2;
         }
     }

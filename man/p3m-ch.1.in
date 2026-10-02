@@ -1,0 +1,126 @@
+.TH P3M-CH 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-ch \- parallel chmod, chown and chgrp in a single scan
+.SH SYNOPSIS
+.B p3m-ch
+.RI [ OPTIONS ]
+.IR PATH ...
+.SH DESCRIPTION
+.B p3m-ch
+changes mode, owner and group across directory trees in one multi-threaded
+recursive traversal.
+The named
+.IR PATH s
+themselves are processed too.
+.PP
+Without
+.B \-\-apply
+this is a
+.B dry run
+that only lists the changes which would be made, as CSV.
+Only entries whose metadata actually differs generate system calls, so
+re-running on a compliant tree is nearly free and the dry run is an exact
+preview.
+.PP
+At least one of
+.BR \-m ", " \-f ", " \-d ", " \-u ", " \-g
+is required.
+Ownership is changed before mode so that set-id bits land as specified.
+.SH OPTIONS
+.SS Mode and ownership
+.TP
+.BR \-m ", " \-\-mode " \fIMODE\fR"
+Mode for both files and directories.
+.TP
+.BR \-f ", " \-\-file\-mode " \fIMODE\fR"
+Mode for files only (overrides
+.B \-m
+for files).
+.TP
+.BR \-d ", " \-\-dir\-mode " \fIMODE\fR"
+Mode for directories only (overrides
+.B \-m
+for directories).
+.TP
+.BR \-u ", " \-\-owner " \fIUSER\fR"
+New owner, as a name or numeric uid.
+.IR USER : GROUP
+is also accepted.
+.TP
+.BR \-g ", " \-\-group " \fIGROUP\fR"
+New group, as a name or numeric gid.
+.PP
+.I MODE
+is octal (\fB775\fR, \fB0775\fR, \fB2755\fR) or symbolic as in
+.BR chmod (1):
+clauses of
+.RB [ ugoa ]([ +\-= ][ rwxXst ]|[ +\-= ][ ugo ])+
+separated by commas, for example
+.BR u+rwx,g\-w ,
+.BR o=rx ,
+.BR a+X ,
+.BR g=u ,
+.BR +t .
+.SS Execution
+.TP
+.B \-\-apply
+Make the changes (the default is a dry run).
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Worker threads (default: the number of online CPUs).
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the CSV change list to
+.I FILE
+and show a live progress display.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the console listing; progress and the summary are still shown, and a
+.B \-o
+file is still written.
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH OUTPUT
+CSV rows list each entry that differs, with the old and new mode, owner and
+group and a result column.
+.SH SAFETY
+Symbolic links are never followed.
+Modes are never changed on links themselves (Linux does not support it), but
+ownership is (via
+.BR lchown (2)).
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Errors were encountered.
+.TP
+.B 2
+Usage error.
+.SH EXAMPLES
+Preview normalising a tree to 755/644:
+.PP
+.RS
+.nf
+p3m\-ch \-d 0755 \-f 0644 /srv/www
+.fi
+.RE
+.PP
+Apply it, together with an ownership change, in one pass:
+.PP
+.RS
+.nf
+p3m\-ch \-\-apply \-d 0755 \-f 0644 \-u www:www /srv/www
+.fi
+.RE
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-find (1),
+.BR chmod (1),
+.BR chown (1),
+.BR chgrp (1)

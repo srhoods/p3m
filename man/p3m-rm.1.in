@@ -1,0 +1,100 @@
+.TH P3M-RM 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-rm \- parallel recursive remove with a hard root guard
+.SH SYNOPSIS
+.B p3m-rm
+.RI [ OPTIONS ]
+.IR PATH | MASK ...
+.SH DESCRIPTION
+.B p3m-rm
+removes files and directory trees using a pool of worker threads, like
+.BR "rm \-rf" .
+Arguments are literal paths or glob masks (expanded with
+.BR glob (3));
+quote masks to stop the shell expanding them, for example
+.BR "p3m\-rm '/data/tmp\-*'" .
+.PP
+Without
+.B \-\-apply
+this is a
+.B dry run
+that only lists, as CSV, everything that would be removed.
+.PP
+With
+.BR \-\-apply ,
+the parallel walk unlinks files as it scans and collects directories, which
+are then removed deepest level first so that parents never race their
+children.
+A missing entry is treated as already removed, as with
+.BR "rm \-f" .
+.SH OPTIONS
+.TP
+.B \-\-apply
+Actually remove (the default is a dry run).
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Worker threads (default: the number of online CPUs).
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the CSV to
+.I FILE
+and show a live progress display.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the console listing; progress and the summary are still shown, and a
+.B \-o
+file is still written.
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH SAFETY
+.IP \(bu 2
+Any path that resolves to
+.B /
+is refused outright, before any work starts, and aborts the whole run.
+This guard cannot be overridden.
+.B .
+and
+.B ..
+are refused as well.
+.IP \(bu 2
+Symbolic links are never followed: the link itself is removed and its target
+is untouched.
+Every directory is opened with
+.B O_NOFOLLOW
+so a directory swapped for a symlink mid-run cannot redirect deletion.
+.IP \(bu 2
+The guard pass completes before the first entry is unlinked.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Errors were encountered.
+.TP
+.B 2
+Usage error or root-guard refusal.
+.SH EXAMPLES
+See what would be removed:
+.PP
+.RS
+.nf
+p3m\-rm '/scratch/build\-*'
+.fi
+.RE
+.PP
+Remove it, showing only progress and the summary:
+.PP
+.RS
+.nf
+p3m\-rm \-\-apply \-q '/scratch/build\-*'
+.fi
+.RE
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-find (1),
+.BR rm (1)

@@ -29,8 +29,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_FIND_VERSION "1.0.0"
-
 static struct {
     int          nthreads;
     const char  *outpath;
@@ -852,8 +850,7 @@ int main(int argc, char **argv)
             usage(stdout);
             return 0;
         } else if (!strcmp(a, "-V") || !strcmp(a, "--version")) {
-            printf("p3m-find %s (p3m: Parallel POSIX Permission Manager)\n",
-                   P3M_FIND_VERSION);
+            p3m_print_version("p3m-find");
             return 0;
         } else {
             break;

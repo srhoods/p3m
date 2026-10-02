@@ -1,0 +1,109 @@
+.TH P3M-STATS 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-stats \- age and hot/cold statistics from a p3m-ls catalogue
+.SH SYNOPSIS
+.B p3m-stats
+.RI [ OPTIONS ]
+.RI [ FILE ]
+.SH DESCRIPTION
+.B p3m-stats
+reads a CSV catalogue produced by
+.B "p3m\-ls \-m full"
+(or
+.BR "\-m standard" ,
+for modification-time statistics only) and reports:
+.IP \(bu 2
+the N most recently accessed files
+.RB ( atime ),
+the N most recently modified files
+.RB ( mtime )
+and the N largest files;
+.IP \(bu 2
+how many files and bytes were last accessed, and last modified, within each
+age bracket (1 day, 1 week, 1 month, 3 months, 6 months, 1 year, 2 years,
+5 years, older);
+.IP \(bu 2
+a breakdown of file count and bytes by (lower-cased) extension.
+.PP
+With no
+.IR FILE ,
+standard input is read, so
+.B "p3m\-ls \-m full /data | p3m\-stats"
+works without an intermediate file.
+The header row is used to locate the columns by name, so column order does not
+matter and extra columns are ignored.
+Directory rows are excluded from the report.
+.PP
+The input is streamed once; only fixed-size histograms, a few bounded top-N
+heaps and a bounded extension table are held in memory, so memory use does not
+grow with the number of rows.
+.PP
+Rows that are short or have an unparsable timestamp are skipped and counted;
+the report is still produced and the exit status is 1.
+.SH OPTIONS
+.TP
+.BR \-n ", " \-\-top " \fIN\fR"
+Length of the most-recently-accessed, most-recently-modified and largest-files
+lists (default 20;
+.B 0
+disables them).
+.TP
+.BR \-e ", " \-\-top\-ext " \fIN\fR"
+Number of extensions shown in the breakdown, by bytes (default 20;
+.B 0
+disables it).
+Remaining extensions are summed in an
+.B (other)
+row; files without an extension appear as
+.BR (none) .
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the report to
+.I FILE
+instead of standard output.
+.TP
+.BI \-\-csv\-summary " FILE"
+Also write the age histograms as CSV
+.RI ( kind,bucket,files,bytes )
+to
+.IR FILE .
+.TP
+.BI \-\-now " TIMESTAMP"
+Treat
+.I TIMESTAMP
+(ISO\ 8601 UTC, for example
+.BR 2026\-09\-02T00:00:00Z )
+as the current time, for reproducible reports.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the report on standard output (useful with
+.B \-o
+and
+.BR \-\-csv\-summary ).
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The report was produced but some rows were skipped as malformed.
+.TP
+.B 2
+Usage error, unreadable input, or input lacking a
+.I path
+column or any timestamp column.
+.SH EXAMPLES
+.nf
+p3m\-ls \-m full \-o catalogue.csv /data && p3m\-stats catalogue.csv
+p3m\-ls \-m full /data | p3m\-stats \-n 50 \-e 30
+p3m\-stats \-q \-\-csv\-summary aging.csv catalogue.csv
+.fi
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-ls (1)

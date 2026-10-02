@@ -25,8 +25,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_CH_VERSION "1.2.0"
-
 /* ------------------------------------------------------------------ */
 /* mode specifications: octal or symbolic clause list                   */
 /* ------------------------------------------------------------------ */
@@ -635,8 +633,7 @@ int main(int argc, char **argv)
             usage(stdout);
             return 0;
         case 'V':
-            printf("p3m-ch %s (p3m: Parallel POSIX Permission Manager)\n",
-                   P3M_CH_VERSION);
+            p3m_print_version("p3m-ch");
             return 0;
         default:
             usage(stderr);

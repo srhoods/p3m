@@ -1,0 +1,111 @@
+.TH P3M-CP 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-cp \- parallel copy
+.SH SYNOPSIS
+.B p3m-cp
+.RI [ OPTIONS ]
+.IR SOURCE ...
+.I DEST
+.SH DESCRIPTION
+.B p3m-cp
+copies files and directory trees in parallel, recursively, like
+.BR "cp \-R" .
+If
+.I DEST
+is an existing directory the sources are copied into it; otherwise a single
+.I SOURCE
+is copied to the path
+.IR DEST .
+.PP
+By default this is a
+.B dry run
+that lists everything that would be copied; add
+.B \-\-apply
+to copy.
+Existing destination entries are skipped and reported unless
+.B \-\-overwrite
+is given.
+File data is moved with
+.BR copy_file_range (2)
+(reflink or server-side copy where available), with a read/write fallback.
+.PP
+Directory modes, ownership and timestamps are applied deepest-first after the
+walk, so read-only trees copy correctly.
+.SH OPTIONS
+.TP
+.B \-\-apply
+Actually copy (the default is a dry run).
+.TP
+.B \-\-overwrite
+Replace existing destination entries; without it they are skipped and
+reported.
+.TP
+.BR \-p ", " \-\-preserve
+Preserve mode, ownership (when permitted) and timestamps.
+The default is mode masked by the umask, as with
+.BR cp .
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Worker threads (default: the number of online CPUs).
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the CSV (\fIsource,type,size,destination,result\fR) to
+.I FILE
+and show a live progress display.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the console listing; progress and the summary are still shown, and a
+.B \-o
+file is still written.
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH SAFETY
+Symbolic links are never followed; they are recreated as links.
+Copying a directory into itself is refused before any work starts.
+Destination files are created with
+.B O_EXCL
+so data is never written through a symlink planted at the destination.
+.SH SIGNALS
+On the first
+.B SIGINT
+or
+.B SIGTERM
+during
+.BR \-\-apply ,
+.B p3m-cp
+prints a notice, stops picking up new directories and lets every in-flight
+file copy finish, so no destination file is left truncated.
+Directories already populated still receive their final metadata.
+The summary reports
+.B interrupted
+and the exit status is 130 (SIGINT) or 143 (SIGTERM).
+A second signal terminates immediately, possibly leaving one partially
+written file.
+.SH EXIT STATUS
+.TP
+.B 0
+Success (skipped existing destinations are not errors).
+.TP
+.B 1
+Completed with errors.
+.TP
+.B 2
+Usage error, invalid target, or into-itself refusal.
+.TP
+.BR 130 ", " 143
+Interrupted by SIGINT or SIGTERM.
+.SH EXAMPLES
+.nf
+p3m\-cp /data/project /backup
+p3m\-cp \-\-apply \-p /data/project /backup
+p3m\-cp \-\-apply \-\-overwrite \-j 16 /data/a /data/b /mnt/nfs/dest
+.fi
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-mv (1),
+.BR p3m\-diff (1),
+.BR cp (1)

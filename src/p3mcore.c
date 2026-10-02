@@ -19,6 +19,12 @@
 
 bool p3m_color;
 
+void p3m_print_version(const char *tool)
+{
+    printf("%s %s (p3m: Parallel POSIX Permission Manager)\n", tool,
+           P3M_VERSION);
+}
+
 /* ------------------------------------------------------------------ */
 /* file content copy                                                    */
 /* ------------------------------------------------------------------ */

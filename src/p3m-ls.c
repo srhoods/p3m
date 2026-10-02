@@ -23,8 +23,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_LS_VERSION "1.2.0"
-
 enum detail_mode { MODE_BASIC, MODE_STANDARD, MODE_FULL };
 
 static const char *mode_names[] = { "basic", "standard", "full" };
@@ -444,8 +442,7 @@ int main(int argc, char **argv)
             usage(stdout);
             return 0;
         case 'V':
-            printf("p3m-ls %s (p3m: Parallel POSIX Permission Manager)\n",
-                   P3M_LS_VERSION);
+            p3m_print_version("p3m-ls");
             return 0;
         default:
             usage(stderr);

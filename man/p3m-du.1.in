@@ -1,0 +1,121 @@
+.TH P3M-DU 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-du \- parallel disk usage
+.SH SYNOPSIS
+.B p3m-du
+.RI [ OPTIONS ]
+.RI [ PATH ...]
+.SH DESCRIPTION
+.B p3m-du
+estimates file space usage like
+.BR du (1),
+but walks the tree with a pool of worker threads.
+Sizes, rounding and hard-link handling match GNU
+.B du
+for the supported options.
+.PP
+Output is CSV, one row per directory (and one per non-directory argument),
+size first:
+.PP
+.RS
+.nf
+size,path
+.fi
+.RE
+.PP
+Each directory's size is the recursive total of everything beneath it.
+Rows are printed deepest first, with the
+.I PATH
+arguments last.
+With no
+.IR PATH ,
+the current directory is measured.
+.PP
+Hard-linked files are counted once per run, with deduplication spanning all
+.I PATH
+arguments.
+Symbolic links are never followed.
+.SH OPTIONS
+.SS du options
+.TP
+.BR \-s ", " \-\-summarize
+Only print each
+.I PATH
+argument (same as
+.BR "\-d 0" ).
+.TP
+.BR \-c ", " \-\-total
+Append a grand-total row.
+.TP
+.BR \-d ", " \-\-max\-depth " \fIN\fR"
+Print directories at most
+.I N
+levels below each
+.IR PATH .
+The walk and totals always cover everything.
+.TP
+.BR \-h ", " \-\-human\-readable
+Sizes like 1.0K, 23M, 2.3G (powers of 1024).
+.TP
+.B \-\-si
+Like
+.BR \-h ,
+but powers of 1000.
+.TP
+.BR \-B ", " \-\-block\-size " \fISIZE\fR"
+Print sizes in
+.IR SIZE -byte
+blocks, rounded up.
+.I SIZE
+accepts the suffixes K, M, G, ... (1024-based), KB, MB, ... (1000-based) and
+KiB, MiB, ... (1024-based).
+.TP
+.BR \-b ", " \-\-bytes
+Apparent size
+.RB ( st_size )
+in bytes instead of disk usage.
+.TP
+.BI \-\-exclude " PATTERN"
+Skip entries matching the glob
+.IR PATTERN ;
+matching directories are not entered.
+The pattern is matched against both the entry name and its full path.
+.TP
+.BR \-X ", " \-\-exclude\-from " \fIFILE\fR"
+Read exclude patterns from
+.IR FILE ,
+one per line.
+.SS p3m options
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Worker threads (default: the number of online CPUs).
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the CSV to
+.I FILE
+and show a live progress display.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the console listing; progress and the summary are still shown.
+.TP
+.B \-\-help
+Show usage and exit.
+Unlike the other p3m tools,
+.B \-h
+means
+.B \-\-human\-readable
+here, matching
+.BR du (1).
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH EXAMPLES
+.nf
+p3m\-du \-s \-h /data
+p3m\-du \-d 1 \-B M /srv
+p3m\-du \-c \-\-exclude '*.o' /build
+.fi
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-ls (1),
+.BR du (1)

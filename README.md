@@ -27,20 +27,52 @@ many operations in flight at once.
 | `p3m-diff` | Parallel directory comparison: names, types, sizes and metadata by default, byte-exact content verification with `-c` (size checked first — content read skipped when sizes differ), diff-like exit codes and a plain-language verdict | [docs/p3m-diff.md](docs/p3m-diff.md) |
 | `p3m-stats` | Age and hot/cold statistics from a `p3m-ls -m full` catalogue: most recently accessed/modified and largest files, atime/mtime age histograms and an extension breakdown by file count and bytes, streamed so row count doesn't bound memory | [docs/p3m-stats.md](docs/p3m-stats.md) |
 
-## Building
+## Building and installing
 
 ```sh
-make            # builds all tools into ./bin
-make clean      # removes build artifacts
+make                  # builds all tools into ./bin and man pages into ./obj/man
+make clean            # removes build artifacts
+sudo make install     # installs to /usr (PREFIX=, DESTDIR= supported)
 ```
 
 Requirements: GCC (or Clang), GNU Make, glibc with POSIX threads. No
-external library dependencies.
+external library dependencies. Packaging needs `rpmbuild`.
+
+### RPM
+
+```sh
+make rpm              # binary RPM  -> rpmbuild/RPMS/<arch>/p3m-<version>-1.<dist>.<arch>.rpm
+make srpm             # source RPM  -> rpmbuild/SRPMS/
+```
+
+The package installs the nine tools to `/usr/bin`, their man pages
+(`man p3m`, `man p3m-ls`, ...) and the documentation under
+`/usr/share/doc/p3m`.
+
+## Versioning
+
+The suite is versioned as a whole ([Semantic Versioning](https://semver.org/)).
+The top-level [`VERSION`](VERSION) file is the single source of truth: it is
+compiled into every tool, so any of them reports the release number:
+
+```
+$ p3m-ls --version
+p3m-ls 1.0.0 (p3m: Parallel POSIX Permission Manager)
+```
+
+[CHANGELOG.md](CHANGELOG.md) has one `## [x.y.z] - date` heading per release,
+and the RPM version, its `%changelog` and the man-page footers are generated
+from those two files. `make check-version` fails if they disagree.
+
+To cut a release: move the `[Unreleased]` entries under a new
+`## [x.y.z] - YYYY-MM-DD` heading, put `x.y.z` in `VERSION`, run
+`make check-version rpm`, then commit and tag `vx.y.z`.
 
 ## Documentation
 
-Per-tool user documentation lives in [`docs/`](docs/). See
-[CHANGELOG.md](CHANGELOG.md) for a history of what changed and when.
+Per-tool user documentation lives in [`docs/`](docs/), and every tool has a
+man page (`man p3m` gives an overview). See [CHANGELOG.md](CHANGELOG.md) for
+a history of what changed and when.
 
 ## Testing
 

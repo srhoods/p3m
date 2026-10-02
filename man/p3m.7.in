@@ -1,0 +1,91 @@
+.TH P3M 7 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m \- Parallel POSIX Permission Manager: parallel file system tools
+.SH DESCRIPTION
+p3m is a suite of command line tools for Linux that parallelise traditionally
+single-threaded file system operations across large directory trees.
+Standard tools such as
+.B "chmod \-R"
+walk the tree and issue system calls from one thread; on trees with many
+files, especially on network or high-latency storage, wall-clock time is
+dominated by serialised metadata operations.
+The p3m tools keep many operations in flight using a pool of worker threads.
+.SH TOOLS
+.TP
+.BR p3m\-ls (1)
+Recursive directory lister with CSV output at three detail levels.
+.TP
+.BR p3m\-ch (1)
+chmod, chown and chgrp in a single scan.
+.TP
+.BR p3m\-rm (1)
+Recursive remove with glob masks and a hard root guard.
+.TP
+.BR p3m\-du (1)
+Disk usage with GNU du-compatible options.
+.TP
+.BR p3m\-cp (1)
+Recursive copy.
+.TP
+.BR p3m\-mv (1)
+Move, with a rename fast path and tree merging.
+.TP
+.BR p3m\-find (1)
+find with the classic expression grammar (read-only).
+.TP
+.BR p3m\-diff (1)
+Directory comparison with optional byte-exact content verification.
+.TP
+.BR p3m\-stats (1)
+Age and hot/cold statistics from a
+.B "p3m\-ls \-m full"
+catalogue.
+.SH CONVENTIONS
+.IP \(bu 2
+Tools that modify the file system are
+.B dry runs
+by default and take
+.B \-\-apply
+to make changes.
+.IP \(bu 2
+Output is CSV (RFC\ 4180 quoting), written to standard output or to a file with
+.BR \-o .
+.B \-o
+and
+.B \-q
+enable a live progress display on a terminal; a summary is always printed to
+standard error.
+.IP \(bu 2
+.B \-j
+sets the worker thread count (default: the number of online CPUs).
+.IP \(bu 2
+Symbolic links are never followed.
+.IP \(bu 2
+Exit status:
+.B 0
+success,
+.B 1
+completed with errors,
+.B 2
+usage error.
+.BR p3m\-cp " and " p3m\-mv
+additionally exit 130 or 143 when interrupted by SIGINT or SIGTERM after
+finishing their in-flight transfers.
+.IP \(bu 2
+The suite is versioned as a whole:
+.B \-\-version
+on any tool prints the same release number.
+.SH FILES
+.TP
+.I /usr/share/doc/p3m/
+README, CHANGELOG and per-tool documentation.
+.SH SEE ALSO
+.BR p3m\-ls (1),
+.BR p3m\-ch (1),
+.BR p3m\-rm (1),
+.BR p3m\-du (1),
+.BR p3m\-cp (1),
+.BR p3m\-mv (1),
+.BR p3m\-find (1),
+.BR p3m\-diff (1),
+.BR p3m\-stats (1)

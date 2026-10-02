@@ -24,8 +24,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define P3M_CP_VERSION "1.1.0"
-
 static struct {
     bool         apply;
     bool         overwrite;
@@ -800,8 +798,7 @@ int main(int argc, char **argv)
             usage(stdout);
             return 0;
         case 'V':
-            printf("p3m-cp %s (p3m: Parallel POSIX Permission Manager)\n",
-                   P3M_CP_VERSION);
+            p3m_print_version("p3m-cp");
             return 0;
         default:
             usage(stderr);

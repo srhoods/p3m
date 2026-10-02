@@ -1,0 +1,106 @@
+.TH P3M-MV 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-mv \- parallel move
+.SH SYNOPSIS
+.B p3m-mv
+.RI [ OPTIONS ]
+.IR SOURCE ...
+.I DEST
+.SH DESCRIPTION
+.B p3m-mv
+moves files and directory trees in parallel.
+On the same file system a subtree moves with a single
+.BR rename (2),
+which is instant regardless of size.
+Across file systems it is copied in parallel with full metadata preservation
+and each source entry is removed only after its copy has fully succeeded.
+.PP
+Unlike
+.BR mv (1),
+an existing destination directory is
+.I merged
+rather than refused; each conflict-free subtree still moves by rename.
+Emptied source directories are removed deepest-first; a directory that still
+holds skipped entries is kept, so a skipped conflict never loses data.
+.PP
+By default this is a
+.B dry run
+listing what would happen (with rename/copy prediction); add
+.B \-\-apply
+to move.
+.SH OPTIONS
+.TP
+.B \-\-apply
+Actually move (the default is a dry run).
+.TP
+.B \-\-overwrite
+Replace existing destination entries; without it they are skipped and their
+sources kept.
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Worker threads (default: the number of online CPUs).
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the CSV to
+.I FILE
+and show a live progress display.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the console listing; progress and the summary are still shown, and a
+.B \-o
+file is still written.
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH SAFETY
+The file system root can never be a source; this guard cannot be overridden.
+.B .
+and
+.B ..
+are refused, as are moves of a directory into itself.
+Symbolic links are moved as links and never followed.
+.SH SIGNALS
+On the first
+.B SIGINT
+or
+.B SIGTERM
+during
+.BR \-\-apply ,
+.B p3m-mv
+prints a notice, stops picking up new work and lets every in-flight rename or
+cross-device copy finish.
+A source file is never deleted before its destination is completely written,
+and no destination is left truncated; entries not yet reached stay where they
+are.
+The summary reports
+.B interrupted
+and the exit status is 130 (SIGINT) or 143 (SIGTERM).
+A second signal terminates immediately; at worst one in-flight destination
+file is left partial, with its source intact.
+.SH EXIT STATUS
+.TP
+.B 0
+Success (skipped existing destinations are not errors).
+.TP
+.B 1
+Completed with errors.
+.TP
+.B 2
+Usage error, root-guard or into-itself refusal.
+.TP
+.BR 130 ", " 143
+Interrupted by SIGINT or SIGTERM.
+.SH EXAMPLES
+.nf
+p3m\-mv /data/incoming /data/archive
+p3m\-mv \-\-apply /data/incoming /data/archive
+p3m\-mv \-\-apply \-j 16 /scratch/run42 /mnt/nfs/results
+.fi
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-cp (1),
+.BR p3m\-rm (1),
+.BR mv (1)

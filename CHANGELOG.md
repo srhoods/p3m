@@ -1,10 +1,48 @@
 # Changelog
 
-All notable changes to the p3m tool suite, generated retrospectively from
-the git history. Dates are commit dates (UTC); entries are newest first.
-Each tool carries its own version number (see `--version`) rather than
-the project being released as a whole — versions are noted per tool
-below where a commit bumped one.
+All notable changes to the p3m tool suite. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the suite
+is versioned as a whole with [Semantic Versioning](https://semver.org/):
+every tool reports the same release number from `--version`, taken from
+the top-level `VERSION` file. `make check-version` verifies that
+`VERSION`, the newest release heading below and the RPM spec agree.
+
+Release headings have the form `## [x.y.z] - YYYY-MM-DD`. Changes not yet
+released collect under `## [Unreleased]`.
+
+## [Unreleased]
+
+## [1.0.0] - 2026-10-02
+
+First numbered release of the suite as a whole.
+
+### Added
+
+- **Suite-wide versioning.** A single `VERSION` file is the source of
+  truth; the Makefile injects it into every binary and `-V`/`--version`
+  now prints the release number (`p3m-ls 1.0.0 (p3m: Parallel POSIX
+  Permission Manager)`) for all nine tools. Previously each tool carried
+  its own independent version number. `make check-version` ties
+  `VERSION`, this changelog and the RPM spec together.
+- **RPM packaging.** `packaging/p3m.spec.in` and `make rpm` / `make srpm`
+  build `p3m` binary and source RPMs; the spec version and `%changelog`
+  are generated from `VERSION` and the release headings in this file.
+- **Man pages** for every tool (`p3m-ls(1)` ... `p3m-stats(1)`) plus an
+  overview, `p3m(7)`, installed by `make install` and the RPM.
+- `make install` / `make dist` with `DESTDIR` and `PREFIX` support.
+
+### Changed
+
+- Compiler flags the build requires (`-std=gnu11`, `-pthread`,
+  `-D_GNU_SOURCE`) are no longer part of the overridable `CFLAGS`, so
+  distribution builds that set `CFLAGS` (as `rpmbuild` does) still compile.
+
+Everything below predates numbered releases. Where entries mention
+per-tool versions (for example `p3m-ls` 1.2.0) those were the tools'
+independent numbers at the time; they are superseded by the suite
+version above.
+
+# Pre-1.0 history
 
 ## 2026-09-16
 
