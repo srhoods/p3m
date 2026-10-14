@@ -12,6 +12,10 @@ released collect under `## [Unreleased]`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-14
+
+Adds `p3m-sync` and the `--lock-file` option.
+
 ### Added
 
 - **`-L`/`--lock-file FILE`** for `p3m-sync`, `p3m-cp` and `p3m-mv`: if `FILE`
