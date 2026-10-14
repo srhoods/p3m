@@ -12,6 +12,10 @@ released collect under `## [Unreleased]`.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-14
+
+Faster directory finalize pass in `p3m-sync`, `p3m-cp` and `p3m-mv` on high-latency storage.
+
 ### Changed
 
 - **`p3m-sync`, `p3m-cp`, `p3m-mv`: the finalize pass is now parallel.** The
