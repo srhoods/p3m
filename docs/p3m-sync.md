@@ -26,6 +26,7 @@ p3m-sync [OPTIONS] SOURCE DEST
 | `--modify-window S` | Treat modification times within `S` seconds as equal, for file systems with coarse timestamps. Default `0` (nanosecond-exact). |
 | `-j, --threads N` | Worker threads, 1–512. Default: number of online CPUs. |
 | `-o, --output FILE` | Write the CSV to `FILE` and show a live progress display. |
+| `-L, --lock-file FILE` | Refuse to run (exit `3`) if `FILE` already exists; otherwise create it for the duration of the run and remove it on exit. See [Lock file](#lock-file). |
 | `-q, --quiet` | Suppress the console listing. Progress and the summary are still shown, and a `-o` file is still written. |
 | `-h, --help` | Usage. |
 | `-V, --version` | Version. |
@@ -113,6 +114,26 @@ command to complete the job. A second signal terminates immediately.
 
 `0` success · `1` completed with errors · `2` usage error, invalid source or
 destination, or a safety refusal · `130`/`143` interrupted.
+
+## Lock file
+
+`-L`/`--lock-file FILE` prevents overlapping runs. If `FILE` already exists the
+tool prints the pid recorded in it (and whether that process is still running),
+changes nothing, and exits `3`. Otherwise it creates `FILE` atomically
+(`O_EXCL`, containing its pid), and removes it when the run ends — normally, on
+error, after a graceful SIGINT/SIGTERM stop, and after a forced second signal.
+Any number of sessions started with the same `FILE` are therefore mutually
+exclusive; a dry run takes the lock too.
+
+```sh
+p3m-sync --apply -L /var/lock/nightly.lock SRC DEST   # a second copy exits 3
+```
+
+A lock left behind by a process that was killed outright (`SIGKILL`, power
+loss) is never removed automatically — the message says when the recorded pid
+is no longer running; delete the file once you are sure nothing else is active.
+The lock is advisory and only as shared as the path: put it on a file system
+visible to every session that should be excluded.
 
 ## Examples
 

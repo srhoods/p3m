@@ -97,6 +97,21 @@ Write the CSV to
 .I FILE
 and show a live progress display.
 .TP
+.BR \-L ", " \-\-lock\-file " \fIFILE\fR"
+Refuse to run if
+.I FILE
+already exists: a message naming the pid recorded in it is printed and the
+exit status is 3.
+Otherwise
+.I FILE
+is created (containing the process id) for the duration of the run and
+removed on exit, including after an interrupt.
+Instances started with the same
+.I FILE
+therefore cannot overlap.
+A lock left behind by a killed process (\fBSIGKILL\fR, power loss) is never
+removed automatically; delete it by hand once no other run is active.
+.TP
 .BR \-q ", " \-\-quiet
 Suppress the console listing; progress and the summary are still shown, and a
 .B \-o
@@ -183,6 +198,11 @@ Completed with errors.
 .TP
 .B 2
 Usage error, invalid source or destination, or a safety refusal.
+.TP
+.B 3
+The lock file given with
+.B \-L
+already exists.
 .TP
 .BR 130 ", " 143
 Interrupted by SIGINT or SIGTERM.

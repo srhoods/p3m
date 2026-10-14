@@ -14,6 +14,14 @@ released collect under `## [Unreleased]`.
 
 ### Added
 
+- **`-L`/`--lock-file FILE`** for `p3m-sync`, `p3m-cp` and `p3m-mv`: if `FILE`
+  exists the tool prints the recorded pid (and whether it is still running)
+  and exits with the new status `3` without touching anything; otherwise it
+  creates `FILE` atomically for the run and removes it on exit — normal,
+  error, graceful stop and forced second signal alike. Lets cron jobs or
+  several sessions that share a lock path exclude one another. A lock left
+  by a `SIGKILL`ed process must be removed by hand. Implemented once in
+  `p3mcore` as `p3m_lock_acquire()`.
 - **`p3m-sync`**: parallel one-way directory synchronisation. Makes `DEST`
   an exact mirror of `SOURCE`; dry run by default, reporting as CSV what
   would be created, updated or have its metadata changed, with `--apply` to

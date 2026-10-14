@@ -704,6 +704,8 @@ static void usage(FILE *to)
 "                      timestamps; default is mode masked by umask, as cp\n"
 "  -j, --threads N     worker threads (default: number of online CPUs)\n"
 "  -o, --output FILE   write CSV to FILE; a live progress display is shown\n"
+"  -L, --lock-file F   exit 3 if lock file F exists; else create it for the\n"
+"                      run and remove it on exit\n"
 "  -q, --quiet         suppress the console listing (progress and the\n"
 "                      summary are still shown; a -o file is still written)\n"
 "  -h, --help          show this help and exit\n"
@@ -753,6 +755,7 @@ static int resolve_dest(const char *dest, char out[PATH_MAX])
 
 int main(int argc, char **argv)
 {
+    const char *lockfile = NULL;
     static const struct option lopts[] = {
         { "apply",     no_argument,       NULL, 1000 },
         { "overwrite", no_argument,       NULL, 1001 },
@@ -760,13 +763,14 @@ int main(int argc, char **argv)
         { "threads",   required_argument, NULL, 'j' },
         { "output",    required_argument, NULL, 'o' },
         { "quiet",     no_argument,       NULL, 'q' },
+        { "lock-file", required_argument, NULL, 'L' },
         { "help",      no_argument,       NULL, 'h' },
         { "version",   no_argument,       NULL, 'V' },
         { 0, 0, 0, 0 }
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "pj:o:qhV", lopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "pj:o:L:qhV", lopts, NULL)) != -1) {
         switch (c) {
         case 1000:
             g.apply = true;
@@ -790,6 +794,9 @@ int main(int argc, char **argv)
         }
         case 'o':
             g.outpath = optarg;
+            break;
+        case 'L':
+            lockfile = optarg;
             break;
         case 'q':
             g.quiet = true;
@@ -877,6 +884,12 @@ int main(int argc, char **argv)
                     argv[optind + i], landing);
             return 2;
         }
+    }
+
+    if (lockfile) {
+        int lk = p3m_lock_acquire("p3m-cp", lockfile);
+        if (lk != 0)
+            return lk == P3M_LOCK_HELD ? 3 : 2;
     }
 
     FILE *out;
