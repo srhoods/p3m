@@ -130,26 +130,35 @@ static int dfx_cmp(const void *a, const void *b)
     return y->depth - x->depth;               /* deepest first */
 }
 
+static void dirfix_one(void *e)
+{
+    struct dirfix *f = e;
+    p3m_set_current(f->path);
+    if (g.preserve) {
+        if (chown(f->path, f->uid, f->gid) != 0 &&
+            errno != EPERM && errno != EINVAL)
+            p3m_note_error(f->path, "chown", errno);
+    }
+    if (chmod(f->path, f->mode) != 0)
+        p3m_note_error(f->path, "chmod", errno);
+    if (g.preserve && utimensat(AT_FDCWD, f->path, f->ts, 0) != 0)
+        p3m_note_error(f->path, "utimens", errno);
+    atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
+    free(f->path);
+}
+
+static int dfx_depth(const void *e)
+{
+    return ((const struct dirfix *)e)->depth;
+}
+
 static void dirfix_apply(void)
 {
     atomic_store(&n_fix_total, n_dfx);
     atomic_store(&fixing, true);
     qsort(dfx, n_dfx, sizeof *dfx, dfx_cmp);
-    for (size_t i = 0; i < n_dfx; i++) {
-        struct dirfix *f = &dfx[i];
-        p3m_set_current(f->path);
-        if (g.preserve) {
-            if (chown(f->path, f->uid, f->gid) != 0 &&
-                errno != EPERM && errno != EINVAL)
-                p3m_note_error(f->path, "chown", errno);
-        }
-        if (chmod(f->path, f->mode) != 0)
-            p3m_note_error(f->path, "chmod", errno);
-        if (g.preserve && utimensat(AT_FDCWD, f->path, f->ts, 0) != 0)
-            p3m_note_error(f->path, "utimens", errno);
-        atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
-        free(f->path);
-    }
+    p3m_for_each_level(dfx, n_dfx, sizeof *dfx, dfx_depth, dirfix_one,
+                       g.nthreads);
     free(dfx);
 }
 

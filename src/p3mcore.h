@@ -140,6 +140,19 @@ void p3m_ob_fmt(p3m_outbuf *ob, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 void p3m_ob_csv(p3m_outbuf *ob, const char *s);    /* RFC 4180 quoting */
 
+/* ---- level-parallel post-passes --------------------------------------- */
+/*
+ * Run FN over the N elements of BASE (ESZ bytes each), which the caller has
+ * sorted deepest-first. Elements of equal depth are processed concurrently
+ * by up to NTHREADS threads; the next (shallower) level starts only after
+ * every element of the current one is done, so "children before parents"
+ * still holds. Used for the serial-looking metadata/rmdir passes that
+ * dominate run time on high-latency storage such as NFS.
+ */
+void p3m_for_each_level(void *base, size_t n, size_t esz,
+                        int (*depth)(const void *elem),
+                        void (*fn)(void *elem), int nthreads);
+
 /* ---- file content copy ----------------------------------------------- */
 
 /* copy open fd in -> out (copy_file_range, falling back to read/write);

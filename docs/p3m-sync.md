@@ -87,7 +87,7 @@ The summary always prints:
   hard crash are ordinary destination-only entries, removed by the next
   `--delete` run.
 - **Directory modes and times** are applied after the walk, deepest first, so a
-  restrictive mode cannot cut off its own children.
+  restrictive mode cannot cut off its own children. The pass is level-parallel across `-j` threads (a depth level at a time), which keeps it fast on NFS.
 - **Guards, checked before any work starts:** the filesystem root can never be
   the destination; source and destination may not be the same directory or
   contain one another; with `--delete`, an empty source is refused when the

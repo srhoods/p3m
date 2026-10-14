@@ -178,43 +178,64 @@ static int depth_desc_rml(const void *a, const void *b)
            ((const struct srcdir *)a)->depth;
 }
 
+static void dirfix_one(void *e)
+{
+    struct dirfix *f = e;
+    p3m_set_current(f->path);
+    if (chown(f->path, f->uid, f->gid) != 0 &&
+        errno != EPERM && errno != EINVAL)
+        p3m_note_error(f->path, "chown", errno);
+    if (chmod(f->path, f->mode) != 0)
+        p3m_note_error(f->path, "chmod", errno);
+    if (utimensat(AT_FDCWD, f->path, f->ts, 0) != 0)
+        p3m_note_error(f->path, "utimens", errno);
+    atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
+    free(f->path);
+}
+
+static int dfx_depth(const void *e)
+{
+    return ((const struct dirfix *)e)->depth;
+}
+
 static void dirfix_apply(void)
 {
     qsort(dfx, n_dfx, sizeof *dfx, depth_desc_dfx);
-    for (size_t i = 0; i < n_dfx; i++) {
-        struct dirfix *f = &dfx[i];
-        p3m_set_current(f->path);
-        if (chown(f->path, f->uid, f->gid) != 0 &&
-            errno != EPERM && errno != EINVAL)
-            p3m_note_error(f->path, "chown", errno);
-        if (chmod(f->path, f->mode) != 0)
-            p3m_note_error(f->path, "chmod", errno);
-        if (utimensat(AT_FDCWD, f->path, f->ts, 0) != 0)
-            p3m_note_error(f->path, "utimens", errno);
-        atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
-        free(f->path);
-    }
+    p3m_for_each_level(dfx, n_dfx, sizeof *dfx, dfx_depth, dirfix_one,
+                       g.nthreads);
     free(dfx);
 }
 
 /* remove now-empty source directories, deepest first; a directory
  * still holding skipped or failed entries is deliberately left */
+static bool rml_had_leftovers;
+
+static void rmdir_one(void *e)
+{
+    struct srcdir *r = e;
+    p3m_set_current(r->path);
+    if (rmdir(r->path) != 0 && errno != ENOENT) {
+        if (errno == ENOTEMPTY && rml_had_leftovers)
+            atomic_fetch_add(&n_left, 1);
+        else
+            p3m_note_error(r->path, "rmdir", errno);
+    }
+    atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
+    free(r->path);
+}
+
+static int rml_depth(const void *e)
+{
+    return ((const struct srcdir *)e)->depth;
+}
+
 static void remove_srcdirs(void)
 {
     qsort(rml, n_rml, sizeof *rml, depth_desc_rml);
-    bool had_leftovers = atomic_load(&n_skipped) > 0 ||
-                         atomic_load(&p3m_nerrors) > 0;
-    for (size_t i = 0; i < n_rml; i++) {
-        p3m_set_current(rml[i].path);
-        if (rmdir(rml[i].path) != 0 && errno != ENOENT) {
-            if (errno == ENOTEMPTY && had_leftovers)
-                atomic_fetch_add(&n_left, 1);
-            else
-                p3m_note_error(rml[i].path, "rmdir", errno);
-        }
-        atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
-        free(rml[i].path);
-    }
+    rml_had_leftovers = atomic_load(&n_skipped) > 0 ||
+                        atomic_load(&p3m_nerrors) > 0;
+    p3m_for_each_level(rml, n_rml, sizeof *rml, rml_depth, rmdir_one,
+                       g.nthreads);
     free(rml);
 }
 
