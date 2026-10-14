@@ -12,6 +12,21 @@ released collect under `## [Unreleased]`.
 
 ## [Unreleased]
 
+### Added
+
+- **`p3m-sync`**: parallel one-way directory synchronisation. Makes `DEST`
+  an exact mirror of `SOURCE`; dry run by default, reporting as CSV what
+  would be created, updated or have its metadata changed, with `--apply` to
+  perform it. Files are compared by size and modification time (or byte for
+  byte with `-c`), copies preserve mtimes so the next run is a no-op, and
+  data is written to a temporary name and renamed into place so a
+  destination file is never half-written. `--delete` additionally removes
+  destination-only entries (and lets file-vs-directory type conflicts be
+  replaced); it is refused for an empty source so an unmounted source cannot
+  wipe the destination. Also `--owner`, `--modify-window`, the standard
+  `-j/-o/-q`, SIGINT/SIGTERM graceful stop, a man page and
+  `docs/p3m-sync.md`.
+
 ## [1.0.0] - 2026-10-02
 
 First numbered release of the suite as a whole.
