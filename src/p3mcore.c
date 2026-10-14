@@ -283,6 +283,60 @@ void p3m_get_current(char *dst, size_t n)
 }
 
 /* ------------------------------------------------------------------ */
+/* level-parallel post-passes                                           */
+/* ------------------------------------------------------------------ */
+
+struct level_job {
+    char           *base;
+    size_t          esz, end;
+    _Atomic size_t  next;
+    void          (*fn)(void *);
+};
+
+static void *level_worker(void *arg)
+{
+    struct level_job *j = arg;
+    size_t i;
+    while ((i = atomic_fetch_add(&j->next, 1)) < j->end)
+        j->fn(j->base + i * j->esz);
+    return NULL;
+}
+
+void p3m_for_each_level(void *base, size_t n, size_t esz,
+                        int (*depth)(const void *elem),
+                        void (*fn)(void *elem), int nthreads)
+{
+    char *b = base;
+    size_t lo = 0;
+    while (lo < n) {
+        int d = depth(b + lo * esz);
+        size_t hi = lo + 1;
+        while (hi < n && depth(b + hi * esz) == d)
+            hi++;
+
+        struct level_job job = { .base = b, .esz = esz, .end = hi,
+                                 .fn = fn };
+        atomic_init(&job.next, lo);
+        size_t width = hi - lo;
+        int nt = nthreads > 0 ? nthreads : 1;
+        if ((size_t)nt > width)
+            nt = (int)width;
+
+        pthread_t tid[512];
+        int started = 0;
+        if (nt > 512)
+            nt = 512;
+        for (int t = 1; t < nt; t++)          /* caller is worker 0 */
+            if (pthread_create(&tid[started], NULL, level_worker, &job) == 0)
+                started++;
+        level_worker(&job);
+        for (int t = 0; t < started; t++)
+            pthread_join(tid[t], NULL);
+        lo = hi;
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* single-instance lock file                                            */
 /* ------------------------------------------------------------------ */
 

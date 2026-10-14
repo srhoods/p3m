@@ -140,6 +140,12 @@ both the metadata fix-ups and the source-directory removals):
   finalize  48,211 / 80,402 dirs   elapsed  9.8s
 ```
 
+The pass runs on all `-j` worker threads: directories are grouped by depth,
+each depth level is processed in parallel, and the next (shallower) level starts
+only when the previous one is complete, so children are always finished before
+their parents. This matters most on NFS and other high-latency storage, where
+every `chmod`/`utimensat` is a network round trip.
+
 The summary always prints; a dry run adds the `--apply` reminder,
 skipped conflicts add the `--overwrite` hint, and any source
 directories kept because they still hold skipped entries are counted.

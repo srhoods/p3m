@@ -123,6 +123,12 @@ it down:
   finalize  17,411 / 40,201 dirs    elapsed  21.3s
 ```
 
+The pass runs on all `-j` worker threads: directories are grouped by depth,
+each depth level is processed in parallel, and the next (shallower) level starts
+only when the previous one is complete, so children are always finished before
+their parents. This matters most on NFS and other high-latency storage, where
+every `chmod`/`utimensat` is a network round trip.
+
 The summary always prints; a dry run adds a reminder that `--apply` is
 required, and skipped conflicts add a `--overwrite` hint:
 

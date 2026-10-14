@@ -12,6 +12,19 @@ released collect under `## [Unreleased]`.
 
 ## [Unreleased]
 
+### Changed
+
+- **`p3m-sync`, `p3m-cp`, `p3m-mv`: the finalize pass is now parallel.** The
+  post-walk pass that applies directory modes/ownership/times (and, for
+  `p3m-mv`, removes emptied source directories) was a single-threaded loop, so
+  on high-latency storage such as NFS it dominated run time. Directories are
+  now processed level by level (deepest first, one depth level concurrently on
+  all `-j` threads, with a barrier between levels), preserving the
+  children-before-parents guarantee. With 5 ms of injected latency per metadata
+  call over 600 directories: `p3m-sync` 4.2s -> 0.22s, `p3m-cp -p` 9.3s ->
+  0.63s, cross-device `p3m-mv` 12.4s -> 0.83s, with identical results. Shared
+  as `p3m_for_each_level()` in `p3mcore`.
+
 ## [1.1.0] - 2026-10-14
 
 Adds `p3m-sync` and the `--lock-file` option.

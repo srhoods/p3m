@@ -188,33 +188,44 @@ static int dfx_cmp(const void *a, const void *b)
     return ((const struct dirfix *)b)->depth - ((const struct dirfix *)a)->depth;
 }
 
+static void dirfix_one(void *e)
+{
+    struct dirfix *f = e;
+    struct stat cur;
+    p3m_set_current(f->path);
+    if (fstatat(AT_FDCWD, f->path, &cur, AT_SYMLINK_NOFOLLOW) != 0) {
+        p3m_note_error(f->path, "stat", errno);
+    } else {
+        if (g.owner && (cur.st_uid != f->uid || cur.st_gid != f->gid) &&
+            chown(f->path, f->uid, f->gid) != 0 &&
+            errno != EPERM && errno != EINVAL)
+            p3m_note_error(f->path, "chown", errno);
+        if ((cur.st_mode & 07777) != f->mode &&
+            chmod(f->path, f->mode) != 0)
+            p3m_note_error(f->path, "chmod", errno);
+        if ((cur.st_mtim.tv_sec != f->ts[1].tv_sec ||
+             cur.st_mtim.tv_nsec != f->ts[1].tv_nsec) &&
+            utimensat(AT_FDCWD, f->path, f->ts, 0) != 0)
+            p3m_note_error(f->path, "utimens", errno);
+    }
+    atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
+    free(f->path);
+}
+
+static int dfx_depth(const void *e)
+{
+    return ((const struct dirfix *)e)->depth;
+}
+
+/* deepest level first; directories of one depth are fixed concurrently,
+ * which matters on NFS where every call is a network round trip */
 static void dirfix_apply(void)
 {
     atomic_store(&n_fix_total, n_dfx);
     atomic_store(&fixing, true);
     qsort(dfx, n_dfx, sizeof *dfx, dfx_cmp);
-    for (size_t i = 0; i < n_dfx; i++) {
-        struct dirfix *f = &dfx[i];
-        struct stat cur;
-        p3m_set_current(f->path);
-        if (fstatat(AT_FDCWD, f->path, &cur, AT_SYMLINK_NOFOLLOW) != 0) {
-            p3m_note_error(f->path, "stat", errno);
-        } else {
-            if (g.owner && (cur.st_uid != f->uid || cur.st_gid != f->gid) &&
-                chown(f->path, f->uid, f->gid) != 0 &&
-                errno != EPERM && errno != EINVAL)
-                p3m_note_error(f->path, "chown", errno);
-            if ((cur.st_mode & 07777) != f->mode &&
-                chmod(f->path, f->mode) != 0)
-                p3m_note_error(f->path, "chmod", errno);
-            if ((cur.st_mtim.tv_sec != f->ts[1].tv_sec ||
-                 cur.st_mtim.tv_nsec != f->ts[1].tv_nsec) &&
-                utimensat(AT_FDCWD, f->path, f->ts, 0) != 0)
-                p3m_note_error(f->path, "utimens", errno);
-        }
-        atomic_fetch_add_explicit(&n_fixed, 1, memory_order_relaxed);
-        free(f->path);
-    }
+    p3m_for_each_level(dfx, n_dfx, sizeof *dfx, dfx_depth, dirfix_one,
+                       g.nthreads);
     free(dfx);
 }
 
