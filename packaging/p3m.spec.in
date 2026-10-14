@@ -1,7 +1,7 @@
 Name:           p3m
 Version:        @VERSION@
 Release:        1%{?dist}
-Summary:        Parallel POSIX file system tools (ls, chmod/chown, rm, du, cp, mv, find, diff, stats)
+Summary:        Parallel POSIX file system tools (ls, chmod/chown, rm, du, cp, mv, find, diff, stats, sync)
 License:        MIT
 URL:            https://github.com/srhoods/p3m
 Source0:        %{name}-%{version}.tar.gz
@@ -14,8 +14,9 @@ p3m is a set of high-performance command line tools that parallelise
 traditionally single-threaded file system operations across large
 directory trees using a pool of worker threads: p3m-ls (recursive listing
 to CSV), p3m-ch (chmod/chown/chgrp in one scan), p3m-rm, p3m-du, p3m-cp,
-p3m-mv, p3m-find, p3m-diff (directory comparison) and p3m-stats (age and
-hot/cold statistics from a p3m-ls catalogue).
+p3m-mv, p3m-find, p3m-diff (directory comparison), p3m-stats (age and
+hot/cold statistics from a p3m-ls catalogue) and p3m-sync (one-way
+directory synchronisation).
 
 Tools that modify the file system are dry-run by default and take --apply.
 
@@ -29,7 +30,7 @@ Tools that modify the file system are dry-run by default and take --apply.
 %make_install PREFIX=%{_prefix}
 
 %check
-for t in ls ch rm du cp mv find diff stats; do
+for t in ls ch rm du cp mv find diff stats sync; do
     ./bin/p3m-$t --version | grep -q '^p3m-'"$t"' %{version} '
 done
 

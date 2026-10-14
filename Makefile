@@ -30,7 +30,7 @@ DOCDIR  ?= $(PREFIX)/share/doc/p3m
 DESTDIR ?=
 
 # Tools are added here as they are implemented
-NAMES := p3m-ls p3m-ch p3m-rm p3m-du p3m-cp p3m-mv p3m-find p3m-diff p3m-stats
+NAMES := p3m-ls p3m-ch p3m-rm p3m-du p3m-cp p3m-mv p3m-find p3m-diff p3m-stats p3m-sync
 TOOLS := $(addprefix $(BIN)/,$(NAMES))
 
 MAN1 := $(patsubst %,$(MANOUT)/%.1,$(NAMES))

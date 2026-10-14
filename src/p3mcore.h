@@ -63,6 +63,19 @@ void p3m_print_errors(void);                       /* report on stderr */
 void p3m_set_current(const char *p);
 void p3m_get_current(char *dst, size_t n);
 
+/* ---- single-instance lock file ---------------------------------------- */
+/*
+ * p3m_lock_acquire() creates PATH with O_CREAT|O_EXCL and writes our pid
+ * into it; the file is removed at exit (and on a forced second signal if
+ * the stop handler is installed). If PATH already exists the caller must
+ * terminate: a message naming the recorded pid (and whether that process
+ * still exists) is printed to stderr and P3M_LOCK_HELD is returned. A lock
+ * left behind by a killed process is never removed automatically.
+ */
+#define P3M_LOCK_HELD  (-1)
+#define P3M_LOCK_ERROR (-2)
+int p3m_lock_acquire(const char *tool, const char *path);
+
 /* ---- graceful SIGINT/SIGTERM stop ------------------------------------ */
 /*
  * For tools where killing worker threads mid-syscall could leave a

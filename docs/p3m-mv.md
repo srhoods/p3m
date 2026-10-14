@@ -31,6 +31,7 @@ to the path `DEST`.
 | `--overwrite` | Replace existing destination entries. Without it they are **skipped** — and a skipped entry always **stays in the source**, so nothing is ever lost. |
 | `-j, --threads N` | Worker threads, 1–512. Default: number of online CPUs. |
 | `-o, --output FILE` | Write the CSV listing to `FILE` and show a live progress display. |
+| `-L, --lock-file FILE` | Refuse to run (exit `3`) if `FILE` already exists; otherwise create it for the duration of the run and remove it on exit. See [Lock file](#lock-file). |
 | `-q, --quiet` | Suppress the console listing. Progress (on a terminal) and the end-of-run summary are still shown, and a `-o` file is still written in full — `-q` only silences stdout. |
 | `-h, --help`, `-V, --version` | Usage / version. |
 
@@ -180,6 +181,26 @@ source, not yet deleted, is unaffected).
 
 This only applies to `--apply`; a dry run does no filesystem writes, so
 there is nothing to protect and an interrupt behaves normally.
+
+## Lock file
+
+`-L`/`--lock-file FILE` prevents overlapping runs. If `FILE` already exists the
+tool prints the pid recorded in it (and whether that process is still running),
+changes nothing, and exits `3`. Otherwise it creates `FILE` atomically
+(`O_EXCL`, containing its pid), and removes it when the run ends — normally, on
+error, after a graceful SIGINT/SIGTERM stop, and after a forced second signal.
+Any number of sessions started with the same `FILE` are therefore mutually
+exclusive; a dry run takes the lock too.
+
+```sh
+p3m-mv --apply -L /var/lock/nightly.lock SRC DEST   # a second copy exits 3
+```
+
+A lock left behind by a process that was killed outright (`SIGKILL`, power
+loss) is never removed automatically — the message says when the recorded pid
+is no longer running; delete the file once you are sure nothing else is active.
+The lock is advisory and only as shared as the path: put it on a file system
+visible to every session that should be excluded.
 
 ## Examples
 

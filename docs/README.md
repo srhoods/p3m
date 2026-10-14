@@ -14,3 +14,4 @@ tool, added as the tool is implemented.
 | [p3m-find.md](p3m-find.md) | `p3m-find` — parallel find with the classic expression grammar and lazy stat |
 | [p3m-diff.md](p3m-diff.md) | `p3m-diff` — parallel directory comparison with byte-exact content verification |
 | [p3m-stats.md](p3m-stats.md) | `p3m-stats` — age and hot/cold statistics from a p3m-ls catalogue |
+| [p3m-sync.md](p3m-sync.md) | `p3m-sync` — parallel one-way directory sync, dry-run by default, optional `--delete` |

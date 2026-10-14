@@ -283,6 +283,68 @@ void p3m_get_current(char *dst, size_t n)
 }
 
 /* ------------------------------------------------------------------ */
+/* single-instance lock file                                            */
+/* ------------------------------------------------------------------ */
+
+static char                  lock_path[PATH_MAX];
+static pid_t                 lock_owner;
+static volatile sig_atomic_t lock_held;
+
+static void lock_release(void)
+{
+    if (lock_held && getpid() == lock_owner) {
+        lock_held = 0;
+        unlink(lock_path);
+    }
+}
+
+int p3m_lock_acquire(const char *tool, const char *path)
+{
+    if (strlen(path) >= sizeof lock_path) {
+        fprintf(stderr, "%s: lock file path too long\n", tool);
+        return P3M_LOCK_ERROR;
+    }
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        if (errno != EEXIST) {
+            fprintf(stderr, "%s: cannot create lock file '%s': %s\n",
+                    tool, path, strerror(errno));
+            return P3M_LOCK_ERROR;
+        }
+        long pid = 0;
+        FILE *f = fopen(path, "r");
+        if (f) {
+            if (fscanf(f, "%ld", &pid) != 1)
+                pid = 0;
+            fclose(f);
+        }
+        if (pid > 0) {
+            bool alive = kill((pid_t)pid, 0) == 0 || errno == EPERM;
+            fprintf(stderr, "%s: lock file '%s' exists (pid %ld, %s) — "
+                    "another instance is using it; exiting%s\n", tool, path,
+                    pid, alive ? "running" : "not running",
+                    alive ? "" : ". The lock looks stale: remove it if no "
+                                 "other run is active");
+        } else {
+            fprintf(stderr, "%s: lock file '%s' exists — another instance "
+                    "is using it; exiting\n", tool, path);
+        }
+        return P3M_LOCK_HELD;
+    }
+    char buf[32];
+    int n = snprintf(buf, sizeof buf, "%ld\n", (long)getpid());
+    if (write(fd, buf, (size_t)n) != n) {
+        /* the pid is advisory; the file's existence is the lock */
+    }
+    close(fd);
+    snprintf(lock_path, sizeof lock_path, "%s", path);
+    lock_owner = getpid();
+    lock_held = 1;
+    atexit(lock_release);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* graceful SIGINT/SIGTERM stop                                         */
 /* ------------------------------------------------------------------ */
 
@@ -298,6 +360,8 @@ static void stop_signal(int sig)
          * Restore the cursor first in case a progress display is live. */
         ssize_t r = write(STDERR_FILENO, "\x1b[?25h\n", 7);
         (void)r;
+        if (lock_held && getpid() == lock_owner)
+            unlink(lock_path);           /* async-signal-safe */
         signal(sig, SIG_DFL);
         raise(sig);
         return;
