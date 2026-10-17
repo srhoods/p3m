@@ -12,6 +12,10 @@ released collect under `## [Unreleased]`.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-17
+
+Adds `p3m-churn`, for estimating the change rate of a path.
+
 ### Added
 
 - **`p3m-churn`**: estimates the change rate of a path, to help decide whether
