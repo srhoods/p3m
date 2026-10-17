@@ -12,6 +12,22 @@ released collect under `## [Unreleased]`.
 
 ## [Unreleased]
 
+### Added
+
+- **`p3m-churn`**: estimates the change rate of a path, to help decide whether
+  and how to add it to a replication job. Scans the path every `--interval`
+  seconds and diffs each scan against the previous one (created / modified /
+  metadata-only / deleted, detected from size, mtime and ctime). On exit
+  (Ctrl-C, `-c` or `-t`) it reports changes per interval and extrapolated per
+  day, the data a whole-file replication would re-send, the hot files that
+  change in the most scans, hot directories (changes and deletions rolled up to
+  `--group-depth`, which exposes temporary-file churn), and replication notes
+  (concentration of change, continuously-written files, short-window caveat).
+  Per-scan and hot-file CSV via `-o` and `--hot-csv`; `--exclude`,
+  `--max-tracked`, multiple paths, parallel scans, and graceful signal
+  handling. Unreadable directories are never mistaken for deletions. State is
+  hashed, roughly 60-115 bytes per file.
+
 ## [1.1.1] - 2026-10-14
 
 Faster directory finalize pass in `p3m-sync`, `p3m-cp` and `p3m-mv` on high-latency storage.

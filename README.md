@@ -26,6 +26,7 @@ many operations in flight at once.
 | `p3m-find` | Parallel find: classic expression grammar (`! ( ) -a -o`), common tests (`-name -type -size -mtime -perm -user -empty -regex …`), lazy stat, `-print0`; deliberately no `-delete`/`-exec` | [docs/p3m-find.md](docs/p3m-find.md) |
 | `p3m-diff` | Parallel directory comparison: names, types, sizes and metadata by default, byte-exact content verification with `-c` (size checked first — content read skipped when sizes differ), diff-like exit codes and a plain-language verdict | [docs/p3m-diff.md](docs/p3m-diff.md) |
 | `p3m-stats` | Age and hot/cold statistics from a `p3m-ls -m full` catalogue: most recently accessed/modified and largest files, atime/mtime age histograms and an extension breakdown by file count and bytes, streamed so row count doesn't bound memory | [docs/p3m-stats.md](docs/p3m-stats.md) |
+| `p3m-churn` | Estimates the change rate of a path by scanning it at an interval and diffing the scans: created/modified/deleted per interval and per day, data a replication would re-send, hot (frequently changing) files and directories, and replication notes | [docs/p3m-churn.md](docs/p3m-churn.md) |
 | `p3m-sync` | Parallel one-way directory sync: dry-run by default, updates by size/mtime (or `-c` content), atomic temp-file+rename writes, optional `--delete` of destination-only entries, overlap and empty-source guards | [docs/p3m-sync.md](docs/p3m-sync.md) |
 
 ## Building and installing
@@ -46,7 +47,7 @@ make rpm              # binary RPM  -> rpmbuild/RPMS/<arch>/p3m-<version>-1.<dis
 make srpm             # source RPM  -> rpmbuild/SRPMS/
 ```
 
-The package installs the ten tools to `/usr/bin`, their man pages
+The package installs the eleven tools to `/usr/bin`, their man pages
 (`man p3m`, `man p3m-ls`, ...) and the documentation under
 `/usr/share/doc/p3m`.
 

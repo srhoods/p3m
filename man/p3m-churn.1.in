@@ -1,0 +1,175 @@
+.TH P3M-CHURN 1 "@DATE@" "p3m @VERSION@" "p3m Manual"
+.SH NAME
+p3m-churn \- estimate the change rate of a path
+.SH SYNOPSIS
+.B p3m-churn
+.RI [ OPTIONS ]
+.IR PATH ...
+.SH DESCRIPTION
+.B p3m-churn
+helps decide whether, and how, to add a path to a replication job.
+It scans
+.I PATH
+repeatedly at a fixed interval and compares each scan with the previous one to
+find files that were
+.BR created ,
+.B modified
+(size or modification time differ),
+changed in
+.B metadata
+only (change time differs but size and modification time do not) or
+.BR deleted .
+The first scan is the baseline and reports no changes.
+.PP
+When the run ends a report is printed on standard output with:
+.IP \(bu 2
+the change rate per interval (average and peak) and extrapolated per day,
+for files and for data;
+.IP \(bu 2
+the data a replication job would have to re-send, taken as the size of the
+created and modified files (whole-file replication; block or delta based tools
+move less);
+.IP \(bu 2
+the
+.B hot files
+that changed in the most scans, and the
+.B hot directories
+(changes rolled up to a chosen depth, which also exposes create/delete churn
+from temporary files whose names never repeat);
+.IP \(bu 2
+notes on what the figures imply for replication: how concentrated the change
+is, which files are rewritten continuously, and whether the window is long
+enough to trust the daily figures.
+.PP
+A scan that fails to read a directory does not count that directory's files as
+deleted.
+Symbolic links are never followed.
+Changes between two scans are collapsed: a file rewritten several times within
+one interval counts once, so the reported rates are lower bounds.
+Shorten the interval to resolve bursts.
+.PP
+State carried between scans is 40 bytes per file in hash tables, roughly 60 to
+115 bytes per file, plus the path of every file that has changed (see
+.BR \-\-max\-tracked ).
+.SH OPTIONS
+.TP
+.BR \-i ", " \-\-interval " \fISECONDS\fR"
+Time between the starts of consecutive scans (default 300, minimum 0.1).
+A scan that overruns the interval is followed immediately by the next.
+.TP
+.BR \-c ", " \-\-count " \fIN\fR"
+Stop after
+.I N
+scans in total, including the baseline (at least 2).
+By default the tool runs until stopped.
+.TP
+.BR \-t ", " \-\-duration " \fISECONDS\fR"
+Start no new scan after this many seconds.
+.TP
+.BR \-n ", " \-\-top " \fIN\fR"
+Length of the hot-file and hot-directory lists (default 20).
+.TP
+.BR \-d ", " \-\-group\-depth " \fIN\fR"
+Roll directory changes up to
+.I N
+levels below each
+.I PATH
+(default 2).
+.TP
+.BI \-\-exclude " PATTERN"
+Skip entries whose name or full path matches the glob
+.IR PATTERN .
+May be repeated.
+Excluded directories are not entered.
+.TP
+.BI \-\-max\-tracked " N"
+Remember at most
+.I N
+distinct changed file paths (default 1000000).
+Changes to further files are still counted in the totals and the directory
+roll-up, but are not listed per file.
+.TP
+.BR \-j ", " \-\-threads " \fIN\fR"
+Scan threads (default: the number of online CPUs).
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write one CSV row per scan:
+.IR scan ,
+.IR start ,
+.IR duration_s ,
+.IR files ,
+.IR bytes ,
+.IR dirs ,
+.IR created ,
+.IR modified ,
+.IR metadata ,
+.IR deleted ,
+.IR bytes_changed ,
+.IR bytes_deleted ,
+.IR errors .
+.TP
+.BI \-\-hot\-csv " FILE"
+Write every tracked changed file to
+.IR FILE ,
+most active first:
+.IR path ,
+.IR events ,
+.IR pct_scans ,
+.IR created ,
+.IR modified ,
+.IR bytes_changed ,
+.IR last_size ,
+.IR last_scan .
+.TP
+.BR \-q ", " \-\-quiet
+Do not print a line per scan on standard error.
+.TP
+.BR \-h ", " \-\-help
+Show usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH SIGNALS
+The first
+.B SIGINT
+or
+.B SIGTERM
+lets the scan in progress finish and then prints the report, so
+.B Ctrl\-C
+is the normal way to end an open-ended run.
+A second signal aborts the scan in progress (its totals are discarded; changes
+it had already recorded against individual files and directories remain in the
+hot lists).
+A third quits at once without a report.
+.SH EXIT STATUS
+.TP
+.B 0
+A report was produced and no scan errors occurred.
+.TP
+.B 1
+Fewer than two scans completed, or scan errors occurred (the report is still
+printed).
+.TP
+.B 2
+Usage error.
+.SH EXAMPLES
+Sample a share every 5 minutes for a day, saving the data:
+.PP
+.RS
+.nf
+p3m\-churn \-i 300 \-t 86400 \-o scans.csv \-\-hot\-csv hot.csv /srv/share
+.fi
+.RE
+.PP
+A quick look: six scans a minute apart, ignoring scratch files:
+.PP
+.RS
+.nf
+p3m\-churn \-i 60 \-c 6 \-\-exclude '*.tmp' \-\-exclude '.cache' /data
+.fi
+.RE
+.SH SEE ALSO
+.BR p3m (7),
+.BR p3m\-sync (1),
+.BR p3m\-stats (1),
+.BR p3m\-ls (1)
