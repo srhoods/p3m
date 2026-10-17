@@ -43,6 +43,9 @@ catalogue.
 .TP
 .BR p3m\-sync (1)
 One-way directory synchronisation with optional deletion.
+.TP
+.BR p3m\-churn (1)
+Change-rate estimation: hot files and directories for replication planning.
 .SH CONVENTIONS
 .IP \(bu 2
 Tools that modify the file system are
@@ -92,4 +95,5 @@ README, CHANGELOG and per-tool documentation.
 .BR p3m\-find (1),
 .BR p3m\-diff (1),
 .BR p3m\-stats (1),
-.BR p3m\-sync (1)
+.BR p3m\-sync (1),
+.BR p3m\-churn (1)
